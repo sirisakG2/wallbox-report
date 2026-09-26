@@ -51,6 +51,7 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     { header: 'VIN (PK)', key: 'vin', width: 21 },
     { header: 'VIN picture', key: 'vin_picture', width: 21 },
     { header: 'VIN photo match', key: 'match', width: 10 },
+    { header: 'Read by', key: 'vin_read_by', width: 9 },
     { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
     { header: 'Month', key: 'month', width: 9 },
     { header: 'Job number', key: 'job_number', width: 15 },

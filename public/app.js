@@ -1,6 +1,7 @@
 // Admin console: Dashboard · Import month · Records · Compare · Issues · Months · Export
 import { api } from './lib/api.js';
 import { runImport, suggestMonth } from './lib/importer.js';
+import { freeOcrStatus } from './lib/free-ocr.js';
 import { downloadWorkbook } from './lib/report.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -37,6 +38,11 @@ function matchPill(v) {
   if (v === 0) return '<span class="pill bad">Mismatch</span>';
   return '<span class="pill warn">Not read</span>';
 }
+function readByPill(v) {
+  if (v === 'free') return '<span class="pill ok plain">Free</span>';
+  if (v === 'ai') return '<span class="pill info plain">AI</span>';
+  return '<span class="faint">–</span>';
+}
 function flagCell(v) {
   if (v === 1) return '<span class="pill ok plain">✔</span>';
   if (v === 0) return '<span class="pill bad plain">✘</span>';
@@ -46,7 +52,7 @@ const STATUS_PILL = { done: 'ok', partial: 'warn', running: 'info' };
 const ISSUE_LABEL = {
   duplicate_vin: ['Duplicate VIN', 'warn'], filename_vin: ['File name VIN', 'info'], ocr_mismatch: ['VIN photo mismatch', 'bad'],
   ocr_failed: ['VIN photo unread', 'warn'], bad_date: ['Bad date', 'bad'], missing_vin: ['Missing VIN', 'bad'],
-  scanned_page: ['Scanned page', 'info'], error: ['Error', 'bad'],
+  scanned_page: ['Scanned page', 'info'], error: ['Error', 'bad'], vin_photo_wrong: ['Charger photo in VIN slot', 'warn'],
 };
 const issuePill = (t) => { const [l, c] = ISSUE_LABEL[t] || [t, 'neutral']; return `<span class="pill ${c}">${esc(l)}</span>`; };
 
@@ -181,9 +187,11 @@ function renderImport(params) {
           <div class="info-tile"><span class="label-sm">Month</span><input type="month" class="input" id="fMonth" style="height:32px;width:100%;margin-top:2px"></div>
         </div>
         <div id="fExisting" class="muted" style="margin-top:14px" hidden></div>
+        <div id="freeStatus" style="margin-top:14px"></div>
         <div class="options">
           <label class="check"><input type="checkbox" id="optOcr" checked> Read VIN photo with AI</label>
-          <label class="check"><input type="checkbox" id="optReprocess"> Re-process files already imported</label>
+          <label class="check" title="Files whose VIN photo was not read (e.g. AI allowance ran out) or that failed"><input type="checkbox" id="optRetry" checked> Retry unread / failed files</label>
+          <label class="check"><input type="checkbox" id="optReprocess"> Re-process all files</label>
           <label class="check">Test run — only first <input type="number" class="input" id="optLimit" min="0" value="0" style="width:74px;height:32px"> files <span class="faint">(0 = all)</span></label>
           <div style="flex:1"></div>
           <button class="btn primary lg" id="startBtn">${ICON.play} Start import</button>
@@ -233,8 +241,12 @@ function renderImport(params) {
       $('#fMonth', el).value = existing?.month || suggestMonth(r.title);
       const ex = $('#fExisting', el);
       ex.hidden = !existing;
-      if (existing) ex.innerHTML = `This folder was imported before as <strong>${esc(fmtMonth(existing.month, true))}</strong> — ${fmtN(existing.processed_count)} of ${fmtN(existing.pdf_count)} files processed. Starting again resumes with the remaining files.`;
+      if (existing) ex.innerHTML = `This folder was imported before as <strong>${esc(fmtMonth(existing.month, true))}</strong> — ${fmtN(existing.processed_count)} of ${fmtN(existing.pdf_count)} files processed. Starting again resumes with the remaining files${existing.processed_count ? ' and, with “Retry unread / failed”, re-reads unread VIN photos' : ''}.`;
       $('#folderBox', el).hidden = false;
+      const fs = await freeOcrStatus();
+      $('#freeStatus', el).innerHTML = fs.available
+        ? '<span class="pill ok">Free VIN reader ON</span> <span class="muted">VIN photos are checked on this computer first; AI is used only for unclear photos.</span>'
+        : `<span class="pill warn">Free VIN reader OFF</span> <span class="muted">Every VIN photo uses AI neurons. In Chrome open <code class="mono">chrome://flags/#enable-experimental-web-platform-features</code>, set it to Enabled and relaunch Chrome.</span>`;
     } catch (e) {
       toast(e.message, 'err');
     } finally {
@@ -294,6 +306,7 @@ function renderImport(params) {
       const { batch } = await runImport({
         folder, month,
         reprocess: $('#optReprocess', el).checked,
+        retry: $('#optRetry', el).checked,
         ocr: $('#optOcr', el).checked,
         limit: Number($('#optLimit', el).value) || 0,
       }, ui, ctrl.signal);
@@ -351,12 +364,13 @@ async function renderRecords(params) {
       </form>
       <div class="table-wrap">
         ${data.records.length ? `<table>
-          <thead><tr><th>VIN</th><th>VIN picture</th><th>VIN photo</th><th>Installed</th><th>Job number</th><th>Customer</th><th>Phone</th><th>Region</th><th>Serial</th><th>Month</th><th></th></tr></thead>
+          <thead><tr><th>VIN</th><th>VIN picture</th><th>VIN photo</th><th>Read by</th><th>Installed</th><th>Job number</th><th>Customer</th><th>Phone</th><th>Region</th><th>Serial</th><th>Month</th><th></th></tr></thead>
           <tbody>${data.records.map((r, i) => `
             <tr class="clickable" data-i="${i}">
               <td class="mono">${esc(r.vin)}</td>
               <td class="mono ${r.vin_photo_match === 0 ? 'bad-cell' : ''}">${esc(r.vin_picture) || '<span class="faint">–</span>'}</td>
               <td>${matchPill(r.vin_photo_match)}</td>
+              <td>${readByPill(r.vin_read_by)}</td>
               <td class="num">${esc(fmtDate(r.install_date)) || `<span class="pill bad">${esc(r.install_date_raw || 'missing')}</span>`}</td>
               <td class="mono">${esc(r.job_number)}</td>
               <td>${esc(r.customer_name)}</td>
@@ -390,7 +404,7 @@ async function renderRecords(params) {
 function openRecord(r) {
   const rows = [
     ['VIN (primary key)', `<span class="mono">${esc(r.vin)}</span>`],
-    ['VIN picture (AI)', `<span class="mono">${esc(r.vin_picture) || '–'}</span> ${matchPill(r.vin_photo_match)}`],
+    ['VIN picture', `<span class="mono">${esc(r.vin_picture) || '–'}</span> ${matchPill(r.vin_photo_match)} ${readByPill(r.vin_read_by)}`],
     ['Installation date', `${esc(fmtDate(r.install_date))} <span class="faint">(${esc(r.install_date_raw)})</span>`],
     ['Job number', `<span class="mono">${esc(r.job_number)}</span>`],
     ['Charger / PO code', esc(r.charger_code)],
@@ -403,7 +417,7 @@ function openRecord(r) {
     ['Month', esc(fmtMonth(r.month, true))],
     ['Job URL', r.job_url ? `<a href="${esc(r.job_url)}" target="_blank" rel="noopener">${esc(r.job_url)} ${ICON.ext}</a>` : '–'],
     ['PDF', `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener">${esc(r.pdf_name)} ${ICON.ext}</a>`],
-    ['AI raw reading', `<span class="mono faint">${esc(r.ocr_raw) || '–'}</span>`],
+    ['Raw reading', `<span class="mono faint">${esc(r.ocr_raw) || '–'}</span>`],
     ['Notes', esc(r.notes) || '–'],
     ['Last updated', esc(r.updated_at)],
   ];
@@ -464,7 +478,8 @@ async function openSummary(batchId) {
             <td style="text-align:right">${n ? `<span class="faint">View →</span>` : ''}</td>
           </tr>`).join('')}</tbody>
       </table>
-      <div class="kv" style="border:0;margin-top:10px"><dt>Other checks</dt><dd class="muted">${fmtN(c.missing_vin)} VIN taken from file name · ${fmtN(c.bad_date)} unreadable dates</dd></div>
+      <div class="kv" style="border:0;margin-top:10px"><dt>Other checks</dt><dd class="muted">${fmtN(c.missing_vin)} VIN taken from file name · ${fmtN(c.bad_date)} unreadable dates · ${fmtN(c.charger_photo)} charger photo in VIN slot</dd></div>
+      <div class="kv" style="border:0"><dt>VIN photos read by</dt><dd><span class="pill ok plain">Free ${fmtN(c.read_free)}</span> <span class="pill info plain">AI ${fmtN(c.read_ai)}</span></dd></div>
       <div class="row-actions" style="margin-top:8px">
         <button class="btn" data-sum-go="compare">Compare with reference</button>
         <button class="btn" data-sum-export>${ICON.download} Download Excel</button>

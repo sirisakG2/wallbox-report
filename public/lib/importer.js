@@ -1,6 +1,7 @@
 // Import pipeline for one Drive folder (= one month):
 // list → reference xlsx → for each PDF: download → MuPDF page-1 parse (worker) → Workers AI OCR → save to D1.
 import { api } from './api.js';
+import { freeOcrStatus, freeReadVin } from './free-ocr.js';
 import { parseReference } from './reference.js';
 import { cleanThai, nameFromFileName, normalizeVin, parseThaiDate, VIN_RE, vinFromFileName } from './parse.js';
 
@@ -79,7 +80,7 @@ async function withRetry(fn, tries = 3) {
   for (let i = 0; i < tries; i++) {
     try { return await fn(); } catch (e) {
       err = e;
-      if (e.name === 'AbortError') throw e;
+      if (e.name === 'AbortError' || e instanceof QuotaError) throw e;
       await new Promise((r) => setTimeout(r, 800 * (i + 1)));
     }
   }
@@ -109,12 +110,18 @@ async function download(fileId, signal, onBytes) {
   return out.buffer;
 }
 
+export class QuotaError extends Error {}
+
 async function ocr(mode, jpeg, expected, signal) {
   const q = new URLSearchParams({ mode });
   if (expected) q.set('expected', expected);
   const res = await fetch(`/api/ocr?${q}`, { method: 'POST', body: jpeg, signal, headers: { 'content-type': 'image/jpeg' } });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error || `OCR failed (${res.status})`);
+  if (!res.ok) {
+    const msg = j.error || `OCR failed (${res.status})`;
+    if (/4006|allocation/i.test(msg)) throw new QuotaError('Daily free Workers AI allowance (10,000 neurons) is used up');
+    throw new Error(msg);
+  }
   return j;
 }
 
@@ -127,6 +134,8 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   let f = parsed.fields;
   let vinPicture = '';
   let ocrRaw = '';
+  let readBy = '';
+  let chargerPhoto = false;
   const notes = [];
 
   if (parsed.scanned && !opts.ocr) {
@@ -138,16 +147,32 @@ async function processPdf(file, pool, opts, signal, onBytes) {
     f = { ...r.fields };
     f.install_date = parseThaiDate(f.install_date_raw);
     vinPicture = f.vin_picture || '';
+    readBy = vinPicture ? 'ai' : '';
     ocrRaw = r.raw;
+    opts.stats && opts.stats.aiCalls++;
     notes.push('Page 1 is a scanned image — all fields read by AI, please verify');
     issues.push({ type: 'scanned_page', detail: 'Page 1 has no text layer; fields were read by AI from the image.' });
   } else if (opts.ocr && parsed.vinJpeg) {
     try {
-      const r = await withRetry(() => ocr('vin', parsed.vinJpeg, f.vin, signal));
-      vinPicture = r.vin;
-      ocrRaw = r.raw;
+      // 1) Free on-device check; 2) Workers AI only when the free reader can't confirm the VIN.
+      const free = await freeReadVin(parsed.vinJpeg, f.vin).catch(() => ({ result: 'unknown', text: '' }));
+      if (free.result === 'match') {
+        vinPicture = normalizeVin(f.vin);
+        readBy = 'free';
+        ocrRaw = free.text;
+      } else if (free.result === 'charger') {
+        chargerPhoto = true;
+        ocrRaw = free.text;
+        issues.push({ type: 'vin_photo_wrong', detail: 'The VIN photo slot shows the charger label, not the car VIN' });
+      } else {
+        const r = await withRetry(() => ocr('vin', parsed.vinJpeg, f.vin, signal));
+        vinPicture = r.vin;
+        readBy = r.vin ? 'ai' : '';
+        ocrRaw = r.raw;
+        opts.stats && opts.stats.aiCalls++;
+      }
     } catch (e) {
-      if (e.name === 'AbortError') throw e;
+      if (e.name === 'AbortError' || e instanceof QuotaError) throw e;
       issues.push({ type: 'ocr_failed', detail: e.message });
     }
   } else if (opts.ocr) {
@@ -172,7 +197,7 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   if (vinPicture) {
     match = vinPicture === vin ? 1 : 0;
     if (!match) issues.push({ type: 'ocr_mismatch', detail: `VIN photo reads ${vinPicture}, PDF says ${vin}` });
-  } else if (opts.ocr && !issues.some((i) => i.type === 'ocr_failed')) {
+  } else if (opts.ocr && !chargerPhoto && !issues.some((i) => i.type === 'ocr_failed')) {
     issues.push({ type: 'ocr_failed', detail: `VIN photo could not be read${ocrRaw ? ` (AI: "${ocrRaw.slice(0, 80)}")` : ''}` });
   }
 
@@ -203,6 +228,7 @@ async function processPdf(file, pool, opts, signal, onBytes) {
     pdf_file_id: file.id,
     vin_picture: vinPicture,
     vin_photo_match: match,
+    vin_read_by: readBy,
     ocr_raw: String(ocrRaw || '').slice(0, 500),
     notes: notes.join('; '),
   };
@@ -211,11 +237,11 @@ async function processPdf(file, pool, opts, signal, onBytes) {
 }
 
 // Runs a whole import. `ui` receives progress callbacks.
-export async function runImport({ folder, month, reprocess = false, ocr: useOcr = true, limit = 0, concurrency = 3 }, ui, signal) {
+export async function runImport({ folder, month, reprocess = false, retry = false, ocr: useOcr = true, limit = 0, concurrency = 5 }, ui, signal) {
   const pdfs = folder.files.filter((f) => f.type === 'pdf');
   const refFile = folder.files.find((f) => f.type === 'xlsx');
 
-  const { batch, doneFileIds } = await api('/api/batches', {
+  const { batch, doneFileIds, retryFileIds } = await api('/api/batches', {
     method: 'POST',
     body: { folderUrl: folder.url, month, folderName: folder.title, referenceName: refFile?.name || '', pdfCount: pdfs.length },
   });
@@ -237,9 +263,14 @@ export async function runImport({ folder, month, reprocess = false, ocr: useOcr 
   }
 
   const done = new Set(reprocess ? [] : doneFileIds);
+  if (retry && !reprocess) {
+    for (const id of retryFileIds) done.delete(id);
+    ui.log(`Retrying ${retryFileIds.length} file(s) with an unread VIN photo or an error`);
+  }
   let queue = pdfs.filter((f) => !done.has(f.id));
   if (limit > 0) queue = queue.slice(0, limit);
-  const stats = { total: queue.length, done: 0, saved: 0, duplicates: 0, errors: 0, issues: 0, bytes: 0 };
+  const stats = { total: queue.length, done: 0, saved: 0, duplicates: 0, errors: 0, issues: 0, bytes: 0, aiCalls: 0, free: 0 };
+  let quotaHit = false;
   ui.progress(stats);
   if (!queue.length) {
     ui.log('Nothing new to process.', 'ok');
@@ -247,6 +278,10 @@ export async function runImport({ folder, month, reprocess = false, ocr: useOcr 
     return { batch, stats };
   }
 
+  if (useOcr) {
+    const fs = await freeOcrStatus();
+    ui.log(fs.available ? 'Free VIN reader: ON — AI is used only when it cannot confirm a photo' : `Free VIN reader: OFF (${fs.reason}) — every VIN photo uses AI`, fs.available ? 'ok' : 'warn');
+  }
   ui.log('Loading PDF engine…');
   const pool = new PdfPool(Math.max(1, Math.min(concurrency, navigator.hardwareConcurrency || 2)));
   await pool.start();
@@ -262,6 +297,10 @@ export async function runImport({ folder, month, reprocess = false, ocr: useOcr 
     ui.progress(stats);
   };
 
+  // Internal stop signal (quota) combined with the user's Stop button.
+  const quotaCtrl = new AbortController();
+  signal = AbortSignal.any([signal, quotaCtrl.signal]);
+
   let next = 0;
   const workerLoop = async () => {
     while (next < queue.length) {
@@ -269,13 +308,21 @@ export async function runImport({ folder, month, reprocess = false, ocr: useOcr 
       const file = queue[next++];
       let item;
       try {
-        const { record, issues } = await processPdf(file, pool, { ocr: useOcr }, signal, (n) => { stats.bytes += n; ui.progress(stats); });
+        const { record, issues } = await processPdf(file, pool, { ocr: useOcr, stats }, signal, (n) => { stats.bytes += n; ui.progress(stats); });
+        if (record.vin_read_by === 'free') stats.free++;
         item = { file, record, issues };
         stats.issues += issues.length;
         const flags = issues.map((i) => i.type).join(', ');
         ui.log(`${record.vin} · ${record.install_date || '?'} · ${file.name}${flags ? ` — ${flags}` : ''}`, flags ? 'warn' : 'ok');
       } catch (e) {
         if (e.name === 'AbortError') return;
+        if (e instanceof QuotaError) {
+          // Leave this file unprocessed so the next run picks it up; stop everything.
+          if (!quotaHit) ui.log(`${e.message}. Import paused — run the same URL again after 07:00 (Thailand) to continue.`, 'err');
+          quotaHit = true;
+          quotaCtrl.abort();
+          return;
+        }
         stats.errors++;
         item = { file, record: null, issues: [{ type: 'error', detail: e.message, vin: vinFromFileName(file.name) }] };
         ui.log(`✘ ${file.name}: ${e.message}`, 'err');
@@ -296,6 +343,7 @@ export async function runImport({ folder, month, reprocess = false, ocr: useOcr 
 
   const status = signal.aborted || stats.done < stats.total ? 'partial' : 'done';
   await api(`/api/batches/${batch.id}`, { method: 'PATCH', body: { status } });
+  if (useOcr) ui.log(`VIN photos confirmed free: ${stats.free} · AI calls: ${stats.aiCalls}`, 'ok');
   ui.log(status === 'done' ? 'Import finished.' : 'Import stopped — run again with the same URL to resume.', status === 'done' ? 'ok' : 'warn');
-  return { batch, stats };
+  return { batch, stats, quotaHit };
 }

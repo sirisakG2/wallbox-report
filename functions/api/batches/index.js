@@ -36,5 +36,14 @@ export async function onRequestPost({ request, env }) {
 
   const batch = await env.DB.prepare('SELECT * FROM batches WHERE folder_id = ?').bind(folderId).first();
   const { results } = await env.DB.prepare('SELECT file_id FROM batch_files WHERE batch_id = ?').bind(batch.id).all();
-  return json({ batch, doneFileIds: results.map((r) => r.file_id) });
+  // Files worth another try: failed files, and saved records whose VIN photo reading errored
+  // (e.g. AI quota ran out). Photos the AI already judged unreadable are not retried.
+  const { results: retry } = await env.DB.prepare(`
+    SELECT file_id FROM batch_files WHERE batch_id = ?1 AND status = 'error'
+    UNION
+    SELECT r.pdf_file_id FROM records r WHERE r.batch_id = ?1 AND r.vin_photo_match IS NULL
+      AND EXISTS (SELECT 1 FROM issues i WHERE i.batch_id = ?1 AND i.pdf_file_id = r.pdf_file_id
+        AND i.type = 'ocr_failed' AND i.detail LIKE 'OCR failed:%')`)
+    .bind(batch.id).all();
+  return json({ batch, doneFileIds: results.map((r) => r.file_id), retryFileIds: retry.map((r) => r.file_id) });
 }

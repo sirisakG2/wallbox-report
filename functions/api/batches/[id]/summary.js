@@ -24,6 +24,9 @@ export async function onRequestGet({ params, env }) {
       (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND type = 'scanned_page') AS scanned,
       (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND type = 'missing_vin') AS missing_vin,
       (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND type = 'bad_date') AS bad_date,
+      (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND type = 'vin_photo_wrong') AS charger_photo,
+      (SELECT COUNT(*) FROM records WHERE batch_id = ?1 AND vin_read_by = 'free') AS read_free,
+      (SELECT COUNT(*) FROM records WHERE batch_id = ?1 AND vin_read_by = 'ai') AS read_ai,
       (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND ${QUOTA.replace(/i\./g, '')}) AS quota_hits`)
     .bind(id).first();
 
