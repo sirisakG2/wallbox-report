@@ -1,4 +1,7 @@
-// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&page=1&size=50   (size=all for export)
+// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&page=1&size=50   (size=all for export)
+// Every record carries vin_conf / date_conf (0–100) with reasons. conf=review lists records below
+// 95 % (lowest first) so an admin can open the PDF and confirm or correct them.
+import { CONFIDENCE_COLUMNS, REVIEW_BELOW, withConfidence } from '../../../lib/confidence.js';
 import { json } from '../../../lib/server.js';
 
 export async function onRequestGet({ request, env }) {
@@ -19,12 +22,22 @@ export async function onRequestGet({ request, env }) {
   if (p.get('to')) { where.push('r.install_date <= ?'); vals.push(p.get('to')); }
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const total = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM records r ${w}`).bind(...vals).first()).n;
+  const { results } = await env.DB.prepare(
+    `SELECT r.*, b.month, ${CONFIDENCE_COLUMNS} FROM records r JOIN batches b ON b.id = r.batch_id ${w}
+     ORDER BY r.install_date DESC, r.vin`).bind(...vals).all();
+  let rows = results.map(withConfidence);
+
+  const conf = p.get('conf');
+  if (conf === 'review') {
+    rows = rows.filter((r) => Math.min(r.vin_conf, r.date_conf) < REVIEW_BELOW)
+      .sort((a, b) => Math.min(a.vin_conf, a.date_conf) - Math.min(b.vin_conf, b.date_conf));
+  } else if (conf === 'full') {
+    rows = rows.filter((r) => r.vin_conf === 100 && r.date_conf === 100);
+  }
+
+  const total = rows.length;
   const all = p.get('size') === 'all';
   const size = all ? total || 1 : Math.min(Math.max(Number(p.get('size')) || 50, 1), 500);
   const page = all ? 1 : Math.max(Number(p.get('page')) || 1, 1);
-  const { results } = await env.DB.prepare(
-    `SELECT r.*, b.month FROM records r JOIN batches b ON b.id = r.batch_id ${w}
-     ORDER BY r.install_date DESC, r.vin LIMIT ? OFFSET ?`).bind(...vals, size, (page - 1) * size).all();
-  return json({ total, page, size, records: results });
+  return json({ total, page, size, records: rows.slice((page - 1) * size, page * size) });
 }

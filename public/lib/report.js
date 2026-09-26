@@ -49,10 +49,13 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
 
   addSheet(wb, 'Records', [
     { header: 'VIN (PK)', key: 'vin', width: 21 },
+    { header: 'VIN %', key: 'vin_conf_pct', width: 8 },
+    { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
+    { header: 'Date %', key: 'date_conf_pct', width: 8 },
+    { header: 'Needs review', key: 'needs_review', width: 11 },
     { header: 'VIN picture', key: 'vin_picture', width: 21 },
     { header: 'VIN photo match', key: 'match', width: 10 },
     { header: 'Read by', key: 'vin_read_by', width: 9 },
-    { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
     { header: 'Month', key: 'month', width: 9 },
     { header: 'Job number', key: 'job_number', width: 15 },
     { header: 'Charger / PO code', key: 'charger_code', width: 22 },
@@ -65,14 +68,27 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     { header: 'Job URL', key: 'job_url', width: 30 },
     { header: 'PDF file', key: 'pdf_name', width: 40 },
     { header: 'PDF link', key: 'pdf_link', width: 10 },
+    { header: 'VIN — why', key: 'vin_why', width: 55 },
+    { header: 'Date — why', key: 'date_why', width: 55 },
     { header: 'Notes', key: 'notes', width: 40 },
   ], records.map((r) => ({
+    vin_conf_pct: r.vin_conf / 100,
+    date_conf_pct: r.date_conf / 100,
+    needs_review: Math.min(r.vin_conf, r.date_conf) < 95 ? 'Yes' : '',
+    vin_why: r.vin_conf_reasons.join('; '),
+    date_why: r.date_conf_reasons.join('; '),
     ...r,
     match: flagText(r.vin_photo_match),
     install_date: toDate(r.install_date),
     job_url: urlLink(r.job_url),
     pdf_link: driveLink(r.pdf_file_id),
   })), (row, r) => {
+    for (const [key, score] of [['vin_conf_pct', r.vin_conf], ['date_conf_pct', r.date_conf]]) {
+      const cell = row.getCell(key);
+      cell.numFmt = '0%';
+      cell.fill = score >= 95 ? GREEN_FILL : score >= 80 ? AMBER_FILL : RED_FILL;
+    }
+    if (Math.min(r.vin_conf, r.date_conf) < 95) row.getCell('needs_review').fill = AMBER_FILL;
     const c = row.getCell('match');
     if (r.vin_photo_match === 0) { c.fill = RED_FILL; row.getCell('vin_picture').fill = RED_FILL; }
     else if (r.vin_photo_match === 1) c.fill = GREEN_FILL;

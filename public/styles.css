@@ -283,7 +283,7 @@ td .stack small { color: var(--text-3); font-size: 11.5px; }
 /* ---------- Drawer ---------- */
 .drawer-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 40; backdrop-filter: blur(2px); }
 .drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; width: 520px; background: var(--surface); z-index: 41;
+  position: fixed; top: 0; right: 0; bottom: 0; width: 660px; background: var(--surface); z-index: 41;
   border-left: 1px solid var(--border); box-shadow: -20px 0 50px rgba(0, 0, 0, 0.35); display: flex; flex-direction: column;
   animation: slide 0.18s ease-out;
 }
@@ -341,3 +341,16 @@ body.locked > :not(.login-screen) { display: none !important; }
 .tone-dot.ok { background: var(--ok); } .tone-dot.bad { background: var(--bad); }
 .tone-dot.warn { background: var(--warn); } .tone-dot.info { background: var(--info); }
 .date-dialog { position: fixed; z-index: 51; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 420px; }
+
+/* Confidence review */
+.pill.conf { min-width: 46px; justify-content: center; font-variant-numeric: tabular-nums; }
+.pill.conf-big { height: 26px; font-size: 13px; min-width: 56px; }
+.review { border: 1px solid var(--border); background: var(--surface-2); border-radius: 14px; padding: 14px 16px; margin: 16px 0 10px; }
+.review-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.review-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.review-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.review-value { font-size: 15px; }
+.reasons { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 12.5px; line-height: 1.55; flex: 1; }
+.kpi-link { color: inherit; text-decoration: none !important; transition: border-color 0.15s; }
+.kpi-link:hover { border-color: var(--accent); }

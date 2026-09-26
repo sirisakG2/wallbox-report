@@ -38,6 +38,10 @@ function matchPill(v) {
   if (v === 0) return '<span class="pill bad">Mismatch</span>';
   return '<span class="pill warn">Not read</span>';
 }
+function confPill(score, big = false) {
+  const tone = score >= 95 ? 'ok' : score >= 80 ? 'warn' : 'bad';
+  return `<span class="pill ${tone} plain conf${big ? ' conf-big' : ''}">${score}%</span>`;
+}
 function readByPill(v) {
   if (v === 'free') return '<span class="pill ok plain">Free</span>';
   if (v === 'ai') return '<span class="pill info plain">AI</span>';
@@ -114,7 +118,7 @@ async function renderDashboard() {
     <div class="grid cols-5">
       <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
       <div class="card kpi"><div class="label">VIN photo match</div><div class="value">${read ? pct(s.ocr_match, read) : 0}%</div><div class="sub">${fmtN(s.ocr_match)} match · ${fmtN(s.ocr_mismatch)} mismatch</div></div>
-      <div class="card kpi"><div class="label">Not read</div><div class="value">${fmtN(s.ocr_unread)}</div><div class="sub">VIN photo without a reading</div></div>
+      <a class="card kpi kpi-link" href="#/records?conf=review"><div class="label">To review</div><div class="value" style="color:${s.to_review ? 'var(--warn)' : 'inherit'}">${fmtN(s.to_review)}</div><div class="sub">VIN or date below 95% · ${fmtN(s.full_conf)} at 100%</div></a>
       <div class="card kpi"><div class="label">In reference Excel</div><div class="value">${pct(s.matched, s.reference_rows)}%</div><div class="sub">${fmtN(s.matched)} of ${fmtN(s.reference_rows)} rows have a PDF</div></div>
       <div class="card kpi"><div class="label">Open issues</div><div class="value" style="color:${s.open_issues ? 'var(--warn)' : 'inherit'}">${fmtN(s.open_issues)}</div><div class="sub">need a look</div></div>
     </div>
@@ -345,17 +349,22 @@ function renderImport(params) {
 async function renderRecords(params) {
   const page = Number(params.get('page')) || 1;
   const q = new URLSearchParams({ page, size: 50 });
-  for (const k of ['batch', 'q', 'match', 'from', 'to']) if (params.get(k)) q.set(k, params.get(k));
+  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf']) if (params.get(k)) q.set(k, params.get(k));
   const data = await api(`/api/records?${q}`);
+  state.lastRecords = data.records;
+  state.reviewMode = params.get('conf') === 'review';
   const pages = Math.max(1, Math.ceil(data.total / data.size));
 
   view.innerHTML = `
-    <div class="view-head"><div><h1>Records</h1><p>One row per installation PDF — VIN is the primary key.</p></div>
+    <div class="view-head"><div><h1>Records</h1><p>One row per installation PDF — VIN is the primary key. VIN % / Date % show how sure the reading is; below 95% needs a look.</p></div>
       <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Export Excel</button></div>
     <div class="card">
       <form class="toolbar" id="filters">
         <div class="field"><label>Month</label><select class="select" name="batch">${monthOptions(params.get('batch'))}</select></div>
         <div class="field grow"><label>Search</label><input class="input" name="q" placeholder="VIN, name, job number, serial, phone…" value="${esc(params.get('q') || '')}"></div>
+        <div class="field"><label>Confidence</label><select class="select" name="conf">
+          ${[['', 'All'], ['review', 'Needs review (<95%)'], ['full', '100% only']].map(([v, l]) => `<option value="${v}" ${(params.get('conf') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></div>
         <div class="field"><label>VIN photo</label><select class="select" name="match">
           ${[['', 'All'], ['1', 'Match'], ['0', 'Mismatch'], ['null', 'Not read']].map(([v, l]) => `<option value="${v}" ${params.get('match') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
@@ -366,18 +375,18 @@ async function renderRecords(params) {
       </form>
       <div class="table-wrap">
         ${data.records.length ? `<table>
-          <thead><tr><th>VIN</th><th>VIN picture</th><th>VIN photo</th><th>Read by</th><th>Installed</th><th>Job number</th><th>Customer</th><th>Phone</th><th>Region</th><th>Serial</th><th>Month</th><th></th></tr></thead>
+          <thead><tr><th>VIN</th><th title="How sure the VIN is right">VIN %</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>VIN picture</th><th>VIN photo</th><th>Job number</th><th>Customer</th><th>Phone</th><th>Serial</th><th>Month</th><th></th></tr></thead>
           <tbody>${data.records.map((r, i) => `
             <tr class="clickable" data-i="${i}">
               <td class="mono">${esc(r.vin)}</td>
+              <td title="${esc(r.vin_conf_reasons.join(' · '))}">${confPill(r.vin_conf)}</td>
+              <td class="num">${esc(fmtDate(r.install_date)) || `<span class="pill bad">${esc(r.install_date_raw || 'missing')}</span>`}</td>
+              <td title="${esc(r.date_conf_reasons.join(' · '))}">${confPill(r.date_conf)}</td>
               <td class="mono ${r.vin_photo_match === 0 ? 'bad-cell' : ''}">${esc(r.vin_picture) || '<span class="faint">–</span>'}</td>
               <td>${matchPill(r.vin_photo_match)}</td>
-              <td>${readByPill(r.vin_read_by)}</td>
-              <td class="num">${esc(fmtDate(r.install_date)) || `<span class="pill bad">${esc(r.install_date_raw || 'missing')}</span>`}</td>
               <td class="mono">${esc(r.job_number)}</td>
               <td>${esc(r.customer_name)}</td>
               <td class="num">${esc(r.phone)}</td>
-              <td>${esc(r.region)}</td>
               <td class="mono">${esc(r.serial)}</td>
               <td class="faint">${esc(fmtMonth(r.month))}</td>
               <td><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a></td>
@@ -397,6 +406,7 @@ async function renderRecords(params) {
   f.onsubmit = (e) => { e.preventDefault(); go('records', current()); };
   f.batch.onchange = () => go('records', current());
   f.match.onchange = () => go('records', current());
+  f.conf.onchange = () => go('records', current());
   $('#clearF').onclick = () => go('records');
   $('#prevP').onclick = () => go('records', { ...current(), page: page - 1 });
   $('#nextP').onclick = () => go('records', { ...current(), page: page + 1 });
@@ -404,11 +414,36 @@ async function renderRecords(params) {
 }
 
 function openRecord(r) {
+  const reasons = (list) => `<ul class="reasons">${list.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
+  const review = `
+    <div class="review">
+      <div class="review-top"><span class="label-sm">Check against the PDF, then confirm or correct</span>
+        <a class="btn sm primary" href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener">Open PDF ${ICON.ext}</a></div>
+      <div class="review-grid">
+        <div class="review-box">
+          <div class="review-head"><span>VIN</span>${confPill(r.vin_conf, true)}</div>
+          <div class="mono review-value">${esc(r.vin)}</div>
+          ${reasons(r.vin_conf_reasons)}
+          <div class="row-actions">
+            ${r.vin_confirmed ? '' : `<button class="btn sm" data-confirm-vin="${esc(r.vin)}">✔ Confirm VIN</button>`}
+            <button class="btn sm" data-correct-vin="${esc(r.vin)}">Correct VIN</button>
+          </div>
+        </div>
+        <div class="review-box">
+          <div class="review-head"><span>Installation date</span>${confPill(r.date_conf, true)}</div>
+          <div class="review-value">${esc(fmtDate(r.install_date)) || '<span class="pill bad">unreadable</span>'} <span class="faint">PDF: ${esc(r.install_date_raw) || '–'}</span></div>
+          ${reasons(r.date_conf_reasons)}
+          <div class="row-actions">
+            ${r.date_confirmed || !r.install_date ? '' : `<button class="btn sm" data-confirm-date="${esc(r.vin)}">✔ Confirm date</button>`}
+            <button class="btn sm" data-edit-date="${esc(r.vin)}" data-current="${esc(r.install_date)}">Edit date</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
   const rows = [
     ['VIN (primary key)', `<span class="mono">${esc(r.vin)}</span>`],
     ['VIN picture', `<span class="mono">${esc(r.vin_picture) || '–'}</span> ${matchPill(r.vin_photo_match)} ${readByPill(r.vin_read_by)}`],
-    ['Installation date', `${esc(fmtDate(r.install_date)) || '<span class="pill bad">unreadable</span>'} <span class="faint">(PDF: ${esc(r.install_date_raw) || '–'})</span>
-      <button class="btn sm" data-edit-date="${esc(r.vin)}" data-current="${esc(r.install_date)}" style="margin-left:8px">Edit date</button>`],
+    ['Installation date', `${esc(fmtDate(r.install_date)) || '<span class="pill bad">unreadable</span>'} <span class="faint">(PDF: ${esc(r.install_date_raw) || '–'})</span>`],
     ['Job number', `<span class="mono">${esc(r.job_number)}</span>`],
     ['Charger / PO code', esc(r.charger_code)],
     ['Customer name', esc(r.customer_name)],
@@ -431,7 +466,7 @@ function openRecord(r) {
   d.innerHTML = `
     <div class="drawer-head"><div><div class="label-sm">Installation record</div><h2>${esc(r.customer_name || r.vin)}</h2></div>
       <button class="icon-btn" aria-label="Close">✕</button></div>
-    <div class="drawer-body"><dl style="margin:0">${rows.map(([k, v]) => `<div class="kv"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl></div>`;
+    <div class="drawer-body">${review}<dl style="margin:0">${rows.map(([k, v]) => `<div class="kv"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl></div>`;
   const close = () => { back.remove(); d.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   back.onclick = close;
@@ -726,10 +761,51 @@ function editDate(vin, current) {
     try {
       await api(`/api/records/${encodeURIComponent(vin)}`, { method: 'PATCH', body: { install_date: v } });
       close();
-      $$('.drawer, .drawer-backdrop').forEach((x) => x.remove());
-      toast(`Date saved: ${fmtDate(v)}`);
-      route();
+      await afterReview(`Date saved: ${fmtDate(v)}`);
     } catch (err) { toast(err.message, 'err'); }
+  };
+}
+
+// After a confirm/correct: refresh, and in "Needs review" mode open the next record to check.
+async function afterReview(message) {
+  $$('.drawer, .drawer-backdrop').forEach((x) => x.remove());
+  toast(message);
+  await route();
+  if (state.reviewMode && parseHash().name === 'records' && state.lastRecords?.length) openRecord(state.lastRecords[0]);
+}
+
+async function reviewPatch(vin, body, message) {
+  try {
+    await api(`/api/records/${encodeURIComponent(vin)}`, { method: 'PATCH', body });
+    await afterReview(message);
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function correctVin(vin) {
+  const back = document.createElement('div');
+  back.className = 'drawer-backdrop';
+  back.style.zIndex = 50;
+  const box = document.createElement('div');
+  box.className = 'card card-pad date-dialog';
+  box.innerHTML = `
+    <h2 style="margin:0 0 4px;font-size:17px">Correct VIN</h2>
+    <p class="muted" style="margin:0 0 16px">Type the VIN exactly as on the car / PDF photo. The old VIN is kept in the notes.</p>
+    <div class="field"><label>VIN (17 characters)</label><input class="input lg mono" id="edVin" value="${esc(vin)}" maxlength="17" autocomplete="off" spellcheck="false" style="text-transform:uppercase"></div>
+    <div class="faint" id="edVinHint" style="margin-top:8px;font-size:12.5px">17 / 17</div>
+    <div class="row-actions" style="margin-top:18px;justify-content:flex-end">
+      <button class="btn" id="edCancel">Cancel</button><button class="btn primary" id="edSave">Save</button></div>`;
+  const close = () => { back.remove(); box.remove(); };
+  back.onclick = close;
+  document.body.append(back, box);
+  const inp = $('#edVin', box);
+  inp.oninput = () => { $('#edVinHint', box).textContent = `${inp.value.replace(/[^A-Za-z0-9]/g, '').length} / 17`; };
+  inp.focus();
+  inp.select();
+  $('#edCancel', box).onclick = close;
+  $('#edSave', box).onclick = async () => {
+    const nv = inp.value.trim().toUpperCase();
+    close();
+    await reviewPatch(vin, { new_vin: nv }, nv === vin ? `VIN ${vin} confirmed` : `VIN corrected to ${nv}`);
   };
 }
 
@@ -737,6 +813,12 @@ function editDate(vin, current) {
 document.addEventListener('click', (e) => {
   const g = e.target.closest('[data-go]');
   if (g) { e.preventDefault(); go(g.dataset.go, g.dataset.batch ? { batch: g.dataset.batch } : {}); return; }
+  const cv = e.target.closest('[data-confirm-vin]');
+  if (cv) { e.preventDefault(); reviewPatch(cv.dataset.confirmVin, { confirm_vin: true }, 'VIN confirmed'); return; }
+  const cd = e.target.closest('[data-confirm-date]');
+  if (cd) { e.preventDefault(); reviewPatch(cd.dataset.confirmDate, { confirm_date: true }, 'Date confirmed'); return; }
+  const xv = e.target.closest('[data-correct-vin]');
+  if (xv) { e.preventDefault(); correctVin(xv.dataset.correctVin); return; }
   const ed = e.target.closest('[data-edit-date]');
   if (ed) { e.preventDefault(); editDate(ed.dataset.editDate, ed.dataset.current); return; }
   const sm = e.target.closest('[data-summary]');

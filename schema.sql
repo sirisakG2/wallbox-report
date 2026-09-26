@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS records (
   vin_picture       TEXT NOT NULL DEFAULT '',  -- VIN read from the VIN photo (OCR)
   vin_photo_match   INTEGER,                   -- 1 match, 0 mismatch, NULL not read
   vin_read_by       TEXT NOT NULL DEFAULT '',  -- free (on-device text recognition) | ai (Workers AI) | ''
+  vin_confirmed     INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked the PDF and confirmed/corrected the VIN
+  date_confirmed    INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked the PDF and confirmed/corrected the date
   ocr_raw           TEXT NOT NULL DEFAULT '',
   notes             TEXT NOT NULL DEFAULT '',
   updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
