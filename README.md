@@ -33,7 +33,7 @@ public/            admin UI (index.html, app.js, styles.css, lib/*)
   lib/reference.js submission Excel reader
   lib/report.js    Excel export
 functions/api/     Pages Functions (drive proxy, OCR, D1 CRUD, compare, stats, version)
-functions/_middleware.js  Cloudflare Access JWT check for /api/*
+functions/_middleware.js  admin session check for /api/*
 lib/               shared server helpers
 schema.sql         D1 schema
 ```
@@ -48,11 +48,20 @@ Cloudflare dashboard → Workers & Pages → Create → Pages → **Connect to G
 `sirisakG2/wallbox-report`, production branch `main`, build command *(none)*, output directory `public`.
 Bindings (`DB`, `AI`) and variables come from `wrangler.toml`.
 
-**Protect it with Cloudflare Access** (the app holds customer names/phones):
-Zero Trust → Access → Applications → Add → Self-hosted → domain `wallbox-report.pages.dev`
-(and `*.wallbox-report.pages.dev`) → policy *Allow* emails `sirisak.anotai@gmail.com` (+ team).
-Copy the team domain and the Application Audience (AUD) tag into `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD`
-in `wrangler.toml` and push. Until then every `/api` call except `/api/version` returns 401.
+**Admin login** (the app holds customer names/phones) — two Pages secrets:
+```bash
+wrangler pages secret put ADMIN_PASSWORD --project-name wallbox-report   # the password you sign in with
+openssl rand -base64 48 | wrangler pages secret put SESSION_SECRET --project-name wallbox-report
+```
+Secrets take effect on the next deployment (push a commit or retry the latest deployment).
+Sessions last 7 days; 8 failed logins per IP in 15 minutes lock that IP for 15 minutes.
+Every `/api` route except `/api/version` and `/api/auth/*` requires the session cookie.
+
+Custom domain: `wallbox.anotai.net` (Pages → Custom domains, plus DNS `CNAME wallbox → wallbox-report.pages.dev`, proxied).
+
+**This Mac:** wrangler for this project uses its own login —
+`export XDG_CONFIG_HOME="$HOME/.wrangler-anotai" CLOUDFLARE_ACCOUNT_ID=be60b81c92e36a9d54fb6e7b5977365b`
+before wrangler commands (the default wrangler login belongs to another account).
 
 ## Deploy
 `git push` to `main` = deploy. Never run `wrangler pages deploy` on this Git-connected project.
@@ -61,7 +70,7 @@ Check `/api/version` (or the footer) shows the new commit.
 ## Local development
 ```bash
 npm run db:init:local
-npm run dev                          # http://localhost:8788 — D1 local, Workers AI remote (billed)
+npm run dev                          # http://localhost:8788 — no login locally; D1 local, Workers AI remote (billed)
 npm run check                        # syntax-check all JS
 ```
 
