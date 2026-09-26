@@ -152,6 +152,7 @@ function monthCard(b) {
         <div class="meter"><i style="width:${done}%"></i></div>
       </div>
       <div class="row-actions">
+        <button class="btn sm primary" data-summary="${b.id}">Summary</button>
         <button class="btn sm" data-go="records" data-batch="${b.id}">Records</button>
         <button class="btn sm" data-go="compare" data-batch="${b.id}">Compare</button>
         <button class="btn sm" data-go="issues" data-batch="${b.id}">Issues</button>
@@ -299,11 +300,13 @@ function renderImport(params) {
       toast('Import finished');
       const acts = $('#doneActions', el);
       acts.innerHTML = `
-        <button class="btn primary" data-go="records" data-batch="${batch.id}">View records</button>
+        <button class="btn primary" data-summary="${batch.id}">Import summary</button>
+        <button class="btn" data-go="records" data-batch="${batch.id}">View records</button>
         <button class="btn" data-go="compare" data-batch="${batch.id}">Compare with reference</button>
         <button class="btn" data-go="issues" data-batch="${batch.id}">Issues</button>
         <button class="btn" data-export="${batch.id}">${ICON.download} Download Excel</button>`;
       acts.hidden = false;
+      openSummary(batch.id).catch(() => {});
     } catch (e) {
       ui.log(`Import failed: ${e.message}`, 'err');
       toast(e.message, 'err');
@@ -420,6 +423,67 @@ function openRecord(r) {
   document.body.append(back, d);
 }
 
+// ---------- Import summary (per month) ----------
+async function openSummary(batchId) {
+  const { batch, counts: c, quotaReached } = await api(`/api/batches/${batchId}/summary`);
+  const b = String(batch.id);
+  const rows = [
+    ['Records saved', c.saved, 'neutral', 'One record per PDF, keyed by VIN', ['records', { batch: b }]],
+    ['VIN photo ✔ matches PDF', c.vin_match, 'ok', 'AI reading of the VIN photo = VIN in the PDF', ['records', { batch: b, match: '1' }]],
+    ['VIN photo ✘ differs', c.vin_mismatch, 'bad', 'Check the photo — often an AI misread, sometimes a real error', ['records', { batch: b, match: '0' }]],
+    ['VIN photo not read — AI quota used up', c.unread_quota, 'warn', 'Daily free Workers AI allowance ran out', ['issues', { batch: b, type: 'ocr_failed', q: 'allocation' }]],
+    ['VIN photo not read — other reasons', c.unread_other, 'warn', 'AI saw no VIN, no photo on page 1, scanned page, or AI reading switched off', ['records', { batch: b, match: 'null' }]],
+    ['Files failed (not saved)', c.failed, 'bad', c.failed_quota ? `${fmtN(c.failed_quota)} of them scanned pages that hit the AI quota` : 'Download or reading errors', ['issues', { batch: b, type: 'error' }]],
+    ['Duplicate VIN (same VIN in 2 files)', c.duplicates, 'info', 'Second file kept as an issue — choose which one to keep', ['issues', { batch: b, type: 'duplicate_vin' }]],
+  ];
+  const mins = Math.max(0, Math.round((new Date(`${batch.updated_at}Z`) - new Date(`${batch.imported_at}Z`)) / 60000));
+
+  const back = document.createElement('div');
+  back.className = 'drawer-backdrop';
+  const d = document.createElement('aside');
+  d.className = 'drawer';
+  d.style.width = '640px';
+  d.innerHTML = `
+    <div class="drawer-head"><div><div class="label-sm">Import summary</div><h2>${esc(fmtMonth(batch.month, true))}</h2>
+      <div class="faint" style="font-size:12.5px;margin-top:4px">${esc(batch.folder_name)}</div></div>
+      <button class="icon-btn" aria-label="Close">✕</button></div>
+    <div class="drawer-body">
+      <div class="stats" style="margin:16px 0 18px">
+        <div class="stat"><b>${fmtN(batch.pdf_count)}</b><span>PDFs in folder</span></div>
+        <div class="stat"><b>${fmtN(c.processed)}</b><span>Processed</span></div>
+        <div class="stat"><b>${fmtN(c.scanned)}</b><span>Scanned pages</span></div>
+        <div class="stat"><b>${mins ? `${mins} min` : '–'}</b><span>Last run</span></div>
+      </div>
+      ${quotaReached ? `<div class="login-error" style="margin-bottom:16px">The daily free Workers AI allowance (10,000 neurons) ran out during this import. Unread photos and failed scanned pages can be retried after the allowance resets (00:00 UTC = 07:00 Thailand).</div>` : ''}
+      <table class="summary-table">
+        <thead><tr><th>Result</th><th style="text-align:right">Count</th><th></th></tr></thead>
+        <tbody>${rows.map(([label, n, tone, hint, link], i) => `
+          <tr class="${n ? 'clickable' : ''}" data-row="${i}">
+            <td><div class="stack"><span><i class="tone-dot ${tone}"></i>${esc(label)}</span><small>${esc(hint)}</small></div></td>
+            <td class="num" style="text-align:right;font-size:18px;font-weight:650;${n && tone === 'bad' ? 'color:var(--bad)' : n && tone === 'warn' ? 'color:var(--warn)' : ''}">${fmtN(n)}</td>
+            <td style="text-align:right">${n ? `<span class="faint">View →</span>` : ''}</td>
+          </tr>`).join('')}</tbody>
+      </table>
+      <div class="kv" style="border:0;margin-top:10px"><dt>Other checks</dt><dd class="muted">${fmtN(c.missing_vin)} VIN taken from file name · ${fmtN(c.bad_date)} unreadable dates</dd></div>
+      <div class="row-actions" style="margin-top:8px">
+        <button class="btn" data-sum-go="compare">Compare with reference</button>
+        <button class="btn" data-sum-export>${ICON.download} Download Excel</button>
+      </div>
+    </div>`;
+  const close = () => { back.remove(); d.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  back.onclick = close;
+  $('.icon-btn', d).onclick = close;
+  $$('tr[data-row]', d).forEach((tr) => {
+    const [, n, , , [view_, params]] = rows[Number(tr.dataset.row)];
+    if (n) tr.onclick = () => { close(); go(view_, params); };
+  });
+  $('[data-sum-go]', d).onclick = () => { close(); go('compare', { batch: b }); };
+  $('[data-sum-export]', d).onclick = () => exportExcel(b);
+  document.addEventListener('keydown', onKey);
+  document.body.append(back, d);
+}
+
 // ---------- Compare ----------
 async function renderCompare(params) {
   const batch = params.get('batch') || '';
@@ -472,10 +536,12 @@ async function renderCompare(params) {
 async function renderIssues(params) {
   const batch = params.get('batch') || '';
   const type = params.get('type') || '';
+  const text = params.get('q') || '';
   const showResolved = params.get('resolved') === 'all';
   const q = new URLSearchParams();
   if (batch) q.set('batch', batch);
   if (type) q.set('type', type);
+  if (text) q.set('q', text);
   if (!showResolved) q.set('resolved', '0');
   const { issues } = await api(`/api/issues?${q}`);
   const detailText = (i) => { try { const d = JSON.parse(i.detail); return d?.message || i.detail; } catch { return i.detail; } };
@@ -487,6 +553,7 @@ async function renderIssues(params) {
         <div class="field"><label>Month</label><select class="select" id="iBatch">${monthOptions(batch)}</select></div>
         <div class="field"><label>Type</label><select class="select" id="iType"><option value="">All types</option>
           ${Object.entries(ISSUE_LABEL).map(([k, [l]]) => `<option value="${k}" ${type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        ${text ? `<button class="chip active" id="iClearQ" title="Remove text filter">“${esc(text)}” ✕</button>` : ''}
         <label class="check" style="height:40px"><input type="checkbox" id="iResolved" ${showResolved ? 'checked' : ''}> Show resolved</label>
       </div>
       <div class="table-wrap">
@@ -507,10 +574,11 @@ async function renderIssues(params) {
       </div>
       <div class="pager"><span>${fmtN(issues.length)} issue${issues.length === 1 ? '' : 's'}</span></div>
     </div>`;
-  const nav = () => go('issues', { batch: $('#iBatch').value, type: $('#iType').value, resolved: $('#iResolved').checked ? 'all' : '' });
-  $('#iBatch').onchange = nav;
-  $('#iType').onchange = nav;
-  $('#iResolved').onchange = nav;
+  const nav = (keepQ = true) => go('issues', { batch: $('#iBatch').value, type: $('#iType').value, q: keepQ ? text : '', resolved: $('#iResolved').checked ? 'all' : '' });
+  if (text) $('#iClearQ').onclick = () => nav(false);
+  $('#iBatch').onchange = () => nav();
+  $('#iType').onchange = () => nav();
+  $('#iResolved').onchange = () => nav();
   $$('[data-resolve]').forEach((b) => {
     b.onclick = async () => {
       await api(`/api/issues/${b.dataset.resolve}`, { method: 'PATCH', body: { resolved: Number(b.dataset.val) } });
@@ -550,6 +618,7 @@ async function renderMonths() {
               <td><span class="pill ${STATUS_PILL[x.status] || 'neutral'}">${esc(x.status)}</span></td>
               <td class="faint num">${esc(fmtDate(x.imported_at))}</td>
               <td style="text-align:right;white-space:nowrap">
+                <button class="btn sm primary" data-summary="${x.id}">Summary</button>
                 <button class="btn sm" data-resume="${esc(x.folder_url)}">${x.status === 'done' ? 'Re-check' : 'Resume'}</button>
                 <button class="btn sm" data-export="${x.id}">${ICON.download}</button>
                 <button class="btn sm danger" data-del="${x.id}" data-name="${esc(fmtMonth(x.month, true))}">Delete</button>
@@ -618,6 +687,8 @@ async function exportExcel(batchId) {
 document.addEventListener('click', (e) => {
   const g = e.target.closest('[data-go]');
   if (g) { e.preventDefault(); go(g.dataset.go, g.dataset.batch ? { batch: g.dataset.batch } : {}); return; }
+  const sm = e.target.closest('[data-summary]');
+  if (sm) { e.preventDefault(); openSummary(sm.dataset.summary).catch((err) => toast(err.message, 'err')); return; }
   const x = e.target.closest('[data-export]');
   if (x) { e.preventDefault(); exportExcel(x.dataset.export); }
 });

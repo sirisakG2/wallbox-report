@@ -89,3 +89,5 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_login_ip ON login_attempts(ip, at);
+
+CREATE INDEX IF NOT EXISTS idx_issues_file ON issues(batch_id, pdf_file_id);

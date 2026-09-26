@@ -333,3 +333,10 @@ body.locked > :not(.login-screen) { display: none !important; }
 .login-card p { margin: -12px 0 8px; color: var(--text-2); font-size: 12.5px; letter-spacing: 0.06em; text-transform: uppercase; }
 .login-error { color: var(--bad); background: var(--bad-soft); border-radius: 10px; padding: 9px 12px; font-size: 13px; }
 .login-foot { margin-top: 22px; color: var(--text-3); font-size: 12.5px; }
+
+/* Import summary table */
+.summary-table td { padding: 13px 14px; }
+.summary-table th { position: static; }
+.tone-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 10px; vertical-align: 1px; background: var(--text-3); }
+.tone-dot.ok { background: var(--ok); } .tone-dot.bad { background: var(--bad); }
+.tone-dot.warn { background: var(--warn); } .tone-dot.info { background: var(--info); }
