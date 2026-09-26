@@ -1,0 +1,30 @@
+// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&page=1&size=50   (size=all for export)
+import { json } from '../../lib/server.js';
+
+export async function onRequestGet({ request, env }) {
+  const p = new URL(request.url).searchParams;
+  const where = [];
+  const vals = [];
+  const batch = Number(p.get('batch'));
+  if (batch) { where.push('r.batch_id = ?'); vals.push(batch); }
+  const q = (p.get('q') || '').trim();
+  if (q) {
+    where.push('(r.vin LIKE ? OR r.customer_name LIKE ? OR r.job_number LIKE ? OR r.serial LIKE ? OR r.phone LIKE ? OR r.vin_picture LIKE ?)');
+    vals.push(...Array(6).fill(`%${q}%`));
+  }
+  const match = p.get('match');
+  if (match === '0' || match === '1') { where.push('r.vin_photo_match = ?'); vals.push(Number(match)); }
+  if (match === 'null') where.push('r.vin_photo_match IS NULL');
+  if (p.get('from')) { where.push('r.install_date >= ?'); vals.push(p.get('from')); }
+  if (p.get('to')) { where.push('r.install_date <= ?'); vals.push(p.get('to')); }
+  const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const total = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM records r ${w}`).bind(...vals).first()).n;
+  const all = p.get('size') === 'all';
+  const size = all ? total || 1 : Math.min(Math.max(Number(p.get('size')) || 50, 1), 500);
+  const page = all ? 1 : Math.max(Number(p.get('page')) || 1, 1);
+  const { results } = await env.DB.prepare(
+    `SELECT r.*, b.month FROM records r JOIN batches b ON b.id = r.batch_id ${w}
+     ORDER BY r.install_date DESC, r.vin LIMIT ? OFFSET ?`).bind(...vals, size, (page - 1) * size).all();
+  return json({ total, page, size, records: results });
+}

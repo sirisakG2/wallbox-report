@@ -1,0 +1,17 @@
+name = "wallbox-report"
+compatibility_date = "2026-07-15"
+pages_build_output_dir = "public"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wallbox"
+database_id = "REPLACE_WITH_D1_ID"
+
+[vars]
+GITHUB_REPO = "sirisakG2/wallbox-report"
+# Cloudflare Access (Zero Trust) — set after creating the Access application:
+ACCESS_TEAM_DOMAIN = ""   # e.g. "xpeng-th.cloudflareaccess.com"
+ACCESS_AUD = ""           # Application Audience (AUD) tag

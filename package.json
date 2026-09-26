@@ -1,0 +1,12 @@
+{
+  "name": "wallbox-report",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Xpeng Thailand — Wall Box installation PDF records (Cloudflare Pages + D1 + Workers AI)",
+  "scripts": {
+    "dev": "wrangler pages dev --local",
+    "check": "for f in public/*.js public/lib/*.js functions/*.js functions/api/*.js functions/api/*/*.js functions/api/*/*/*.js lib/*.js; do node --check \"$f\" || exit 1; done",
+    "db:init": "wrangler d1 execute wallbox --remote --file schema.sql",
+    "db:init:local": "wrangler d1 execute wallbox --local --file schema.sql"
+  }
+}
