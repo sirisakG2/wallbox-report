@@ -3,7 +3,7 @@
 import { api } from './api.js';
 import { freeOcrStatus, freeReadVin } from './free-ocr.js';
 import { parseReference } from './reference.js';
-import { cleanThai, nameFromFileName, normalizeVin, parseThaiDate, VIN_RE, vinFromFileName } from './parse.js';
+import { cleanThai, nameFromFileName, normalizeVin, parseAnyDate, VIN_RE, vinFromFileName } from './parse.js';
 
 const THAI_MONTH_NAMES = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -130,6 +130,19 @@ async function ocr(mode, jpeg, expected, signal, opts = {}) {
   return j;
 }
 
+// Is an installation date plausible for the imported month? Returns a reason or ''.
+// Allowed: from 3 months before the month to 1 month after it, and never in the future.
+export function dateProblem(iso, month) {
+  const d = Date.parse(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d)) return '';
+  if (d > Date.now() + 86400000) return 'is in the future';
+  const m = /^(\d{4})-(\d{2})$/.exec(month || '');
+  if (!m) return '';
+  const from = Date.UTC(+m[1], +m[2] - 1 - 3, 1);
+  const to = Date.UTC(+m[1], +m[2] + 1, 0);
+  return d < from || d > to ? `is far from the imported month ${month}` : '';
+}
+
 // Turns one PDF into { record, issues }.
 async function processPdf(file, pool, opts, signal, onBytes) {
   const issues = [];
@@ -150,7 +163,7 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   } else if (parsed.scanned) {
     const r = await withRetry(() => ocr('page', parsed.pageJpeg, '', signal, opts));
     f = { ...r.fields };
-    f.install_date = parseThaiDate(f.install_date_raw);
+    f.install_date = parseAnyDate(f.install_date_raw);
     vinPicture = f.vin_picture || '';
     readBy = vinPicture ? 'ai' : '';
     ocrRaw = r.raw;
@@ -207,6 +220,19 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   }
 
   if (!f.install_date) issues.push({ type: 'bad_date', detail: `Installation date not readable: "${f.install_date_raw || ''}"` });
+  else {
+    const why = dateProblem(f.install_date, opts.month);
+    if (why) issues.push({ type: 'suspicious_date', detail: `Installation date ${f.install_date} ("${f.install_date_raw}") ${why} — check the year/month` });
+  }
+
+  // Reused/edited report: the job number printed in the page header differs from the table,
+  // or the table labels are graphics with values typed over them.
+  const tableJob = String(f.job_number || '').replace(/\s/g, '').toUpperCase();
+  if (f.header_job && tableJob && f.header_job !== tableJob) {
+    issues.push({ type: 'edited_pdf', detail: `Page header shows job ${f.header_job} but the table says ${tableJob} — the report may have been reused/edited` });
+  } else if (f.layout === 'no-labels') {
+    issues.push({ type: 'edited_pdf', detail: 'Table labels are not text (values typed over the form) — check this report' });
+  }
 
   // AI reading of Thai names on scanned pages is not exact; the file name is typed by the installer.
   let customer = cleanThai(f.customer_name || '');
@@ -303,7 +329,7 @@ export async function runImport({ folder, month, reprocess = false, retry = fals
   };
 
   // Shared by all files: once the AI allowance is used up, no further AI calls are attempted.
-  const aiOpts = { ocr: useOcr, stats, aiBlocked: false };
+  const aiOpts = { ocr: useOcr, stats, aiBlocked: false, month: batch.month };
 
   let next = 0;
   const workerLoop = async () => {

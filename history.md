@@ -14,14 +14,17 @@ Live: https://wallbox.anotai.net (also wallbox-report.pages.dev) · Repo: sirisa
 | `d536026` | Free on-device VIN reader first, AI only for unclear photos; charger photo in VIN slot flagged; pause cleanly at AI daily limit; "Retry unread / failed"; 5 files in parallel; "Read by" (Free/AI) column. |
 | `d1feb95` | Fixed memory leak that made files fail after a very large (410 MB) PDF. |
 | 07dbcc8 | Free VIN reader replaced: PaddleOCR (PP-OCRv4) running in the browser on any PC (Dell/Windows or Mac), no Chrome setting, no Apple engine. Tested on 113 June photos: 91 confirmed free, 8 charger photos, 14 to AI; ~0.9 s/photo in the browser. When the AI allowance runs out the import continues with free-only work and leaves AI-needing files for the next run. |
+| next | Installation date fixed: one date reader for all formats (Thai/Western year, "26 พ.ค. 2569", "8/6/2569", "31-05-69", Thai digits), same reader for the submission Excel; "Suspicious date" check (>3 months before / >1 month after the imported month, or future); "Edit date" in record details and "Fix date" in Issues. Parser now uses form landmarks (works for A4, A3, and A4-form-on-A3 layouts, labels wrapping onto two lines, forms with labels as graphics); scans with a garbage text layer go to AI; new "PDF may be edited" check (page-header job ≠ table job). Regression on 143 real PDFs: all fields found, 0 stored values changed. |
 
 ## Data — June 2026 (503 PDFs)
 - First import: 485 records saved; stopped reading photos when the free Workers AI allowance (10,000 neurons/day) ran out.
 - Free pass on the Mac (Apple text recognition): 68 more VIN photos confirmed, 5 charger photos flagged.
-- Now: 369 VIN photos ✔ (301 AI + 68 free), 36 ✘ to check, 2 duplicate VINs.
+- Date fix: 7 numeric dates read, 33 reports of other layouts re-read (18 edited reports all built on old job XPENG2509015 printed 25/9/2025), 2 suspicious years flagged (2566, 2568).
+- Now: 383 VIN photos ✔ (82 free), 5 records without date, 18 "PDF may be edited", 19 files queued for AI retry.
 
 ## Open items
-- June: 24 files still need AI (8 unclear photos, 16 scanned pages) — rerun import with "Retry unread / failed" after 07:00.
+- June: 19 files queued for AI (unclear photos + scanned pages) — rerun import with "Retry unread / failed" after 07:00; then fix remaining dates with "Fix date".
+- Review the 18 "PDF may be edited" reports with the installer.
 - First import on a new PC downloads ~26 MB (free reader models, cached afterwards).
 - Decide: PDF install date is often 1–15 days later than the submission Excel — allow a tolerance in Compare or keep strict?
 

@@ -1,7 +1,7 @@
 // Reads the monthly submission Excel (reference) with ExcelJS.
 // Install sheet: header row contains "Vinno"; the right-hand block repeats the left one, so only the
 // first occurrence of each header is used. Charger-only sheet: title contains "รับเฉพาะเครื่องชาร์จ".
-import { normalizeVin, VIN_RE, cleanThai } from './parse.js';
+import { normalizeVin, VIN_RE, cleanThai, parseAnyDate } from './parse.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -18,22 +18,10 @@ function cellText(v) {
 }
 
 function toIsoDate(v) {
-  if (v instanceof Date) return cellText(v);
-  if (typeof v === 'number' && v > 30000 && v < 80000) { // Excel serial date
-    const d = new Date(Math.round((v - 25569) * 86400000));
-    return cellText(d);
-  }
-  const s = cellText(v).trim();
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
-  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
-  if (m) {
-    let y = Number(m[3]);
-    if (y < 100) y += 2500;
-    if (y > 2400) y -= 543;
-    return `${y}-${pad(m[2])}-${pad(m[1])}`;
-  }
-  return '';
+  if (typeof v === 'number' && v > 30000 && v < 300000) v = new Date(Math.round((v - 25569) * 86400000)); // Excel serial
+  // cellText gives "YYYY-MM-DD" for dates; a date typed with a Thai year (26/5/2569) is stored by
+  // Excel as the year 2569, which parseAnyDate converts to 2026.
+  return parseAnyDate(cellText(v));
 }
 
 const HEADERS = {

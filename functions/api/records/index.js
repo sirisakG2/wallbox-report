@@ -1,5 +1,5 @@
 // GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&page=1&size=50   (size=all for export)
-import { json } from '../../lib/server.js';
+import { json } from '../../../lib/server.js';
 
 export async function onRequestGet({ request, env }) {
   const p = new URL(request.url).searchParams;

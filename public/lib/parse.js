@@ -1,38 +1,63 @@
 // Page-1 parser for the "EV home charging" installation report PDFs.
 // Pure functions + a MuPDF-based extractor; used by the PDF web worker (and node tests).
 
-const THAI_MONTHS = {
-  'ม.ค.': 1, 'ก.พ.': 2, 'มี.ค.': 3, 'เม.ย.': 4, 'พ.ค.': 5, 'มิ.ย.': 6,
-  'ก.ค.': 7, 'ส.ค.': 8, 'ก.ย.': 9, 'ต.ค.': 10, 'พ.ย.': 11, 'ธ.ค.': 12,
-  'มกราคม': 1, 'กุมภาพันธ์': 2, 'มีนาคม': 3, 'เมษายน': 4, 'พฤษภาคม': 5, 'มิถุนายน': 6,
-  'กรกฎาคม': 7, 'สิงหาคม': 8, 'กันยายน': 9, 'ตุลาคม': 10, 'พฤศจิกายน': 11, 'ธันวาคม': 12,
+// Month names → number. Keys are compared with dots and spaces removed ("พ.ค." → "พค").
+const MONTHS = {
+  มค: 1, กพ: 2, มีค: 3, เมย: 4, พค: 5, มิย: 6, กค: 7, สค: 8, กย: 9, ตค: 10, พย: 11, ธค: 12,
+  มกราคม: 1, กุมภาพันธ์: 2, มีนาคม: 3, เมษายน: 4, พฤษภาคม: 5, มิถุนายน: 6,
+  กรกฎาคม: 7, สิงหาคม: 8, กันยายน: 9, ตุลาคม: 10, พฤศจิกายน: 11, ธันวาคม: 12,
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
 
 const pad = (n) => String(n).padStart(2, '0');
 
-// "26 พ.ค. 2569" → "2026-05-26" (Buddhist Era year − 543). Returns '' if unparseable.
-export function parseThaiDate(s) {
-  const m = String(s || '').replace(/\s+/g, ' ').trim().match(/^(\d{1,2})\s*([^\d\s]+)\s*(\d{2,4})$/);
-  if (!m) return '';
-  const month = THAI_MONTHS[m[2].replace(/\s/g, '')];
-  if (!month) return '';
-  let year = Number(m[3]);
-  if (year < 100) year += 2500;
-  if (year > 2400) year -= 543;
-  const day = Number(m[1]);
-  const d = new Date(Date.UTC(year, month - 1, day));
-  if (d.getUTCMonth() !== month - 1) return '';
-  return `${year}-${pad(month)}-${pad(day)}`;
+// Thai (Buddhist Era) or Western year → Western year.
+//   2569 → 2026 · 2026 → 2026 · "69" → 2026 (BE short) · "26" → 2026 (CE short)
+export function toCEYear(y) {
+  y = Number(y);
+  if (y >= 2400) return y - 543;
+  if (y >= 1900) return y;
+  if (y >= 60 && y < 100) return y + 2500 - 543;
+  if (y >= 0 && y < 60) return 2000 + y;
+  return NaN;
 }
+
+function isoDate(y, m, d) {
+  y = toCEYear(y); m = Number(m); d = Number(d);
+  if (!y || m < 1 || m > 12 || d < 1 || d > 31) return '';
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCMonth() === m - 1 ? `${y}-${pad(m)}-${pad(d)}` : '';
+}
+
+// Any date the reports or the Excel use → "YYYY-MM-DD" ('' if unreadable):
+//   "26 พ.ค. 2569", "30 พฤษภาคม 2569", "15 มิ.ย. 2026", "8/6/2569", "26/05/2026", "31-05-69",
+//   "26.5.69", "2026-05-26", Thai digits "๒๖/๕/๒๕๖๙", optional trailing time.
+export function parseAnyDate(input) {
+  const s = String(input || '')
+    .replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 0x0e50))
+    .replace(/\s+/g, ' ').trim()
+    .replace(/\s+\d{1,2}[:.]\d{2}(:\d{2})?\s*(น\.?)?$/, ''); // drop a time part
+  let m = s.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/);
+  if (m) return isoDate(m[1], m[2], m[3]);
+  m = s.match(/^(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{2,4})$/);
+  if (m) return isoDate(m[3], m[2], m[1]); // day/month/year (Thai order)
+  m = s.match(/^(\d{1,2})\s*([^\d]+?)\s*(\d{2,4})$/);
+  if (m) {
+    const key = m[2].replace(/[.\s]/g, '').toLowerCase();
+    const month = MONTHS[key] || MONTHS[key.slice(0, 3)];
+    return month ? isoDate(m[3], month, m[1]) : '';
+  }
+  return '';
+}
+
+// Kept for existing callers.
+export const parseThaiDate = parseAnyDate;
 
 // Header print stamp "3/7/69 09:33" (d/m/BE-yy) → "2026-07-03 09:33"
 export function parsePrintStamp(s) {
   const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/);
   if (!m) return '';
-  let y = Number(m[3]);
-  if (y < 100) y += 2500;
-  if (y > 2400) y -= 543;
-  return `${y}-${pad(m[2])}-${pad(m[1])} ${pad(m[4])}:${m[5]}`;
+  return `${toCEYear(m[3])}-${pad(m[2])}-${pad(m[1])} ${pad(m[4])}:${m[5]}`;
 }
 
 // NFC + "ํา" (nikhahit + sara aa, produced by some PDF fonts) → "ำ"; strip zero-width chars.
@@ -82,11 +107,25 @@ export function dedupeLines(lines) {
   return keep.sort((a, b) => a.y - b.y || a.x - b.x);
 }
 
+// Landmarks of the form, so parsing does not depend on page size: some reports are A4, some A3,
+// and some are an A4 form placed in the corner of an A3 page.
+//   top    = the "A: รายละเอียดลูกค้า (Customer Information)" heading
+//   bottom = the "รูปยืนยันงานติดตั้ง" caption above the photos (or the first photo)
+export function formAnchors(lines, images) {
+  const header = lines.find((l) => /Customer Information|รายละเอียดลูกค้า/i.test(l.text));
+  const caption = lines.find((l) => l.text.includes('รูปยืนยัน'));
+  const top = header ? header.y + header.h / 2 : 120;
+  const photos = images.filter((i) => i.w > 40 && i.h > 40 && i.y > top + 60 && i.w * i.h < 0.5 * 595 * 842);
+  const firstPhoto = photos.length ? Math.min(...photos.map((i) => i.y)) : 380;
+  const bottom = caption && caption.y > top ? caption.y : firstPhoto - 10;
+  return { top, bottom, photos, hasHeader: !!header };
+}
+
 // lines: [{x, y, w, h, text}] in page coords (y down), images: [{x, y, w, h, index}]
 export function parseLines(lines, images) {
   const out = {};
-  const photoTop = Math.min(...images.filter((i) => i.y > 300).map((i) => i.y), 380);
-  const tableLines = lines.filter((l) => l.y > 120 && l.y < photoTop - 10);
+  const { top, bottom, hasHeader } = formAnchors(lines, images);
+  const tableLines = lines.filter((l) => l.y > top && l.y < bottom);
   const labels = [];
   for (const l of tableLines) {
     const hit = LABELS.find(([, test]) => test(l.text));
@@ -96,7 +135,8 @@ export function parseLines(lines, images) {
   for (const lab of labels) {
     const nextLabelX = Math.min(...labels.filter((o) => Math.abs(o.y - lab.y) < 8 && o.x > lab.x).map((o) => o.x), Infinity);
     const vals = tableLines
-      .filter((l) => !isLabel(l) && Math.abs(l.y - lab.y) < 8 && l.x > lab.x + 20 && l.x < nextLabelX)
+      // A label may wrap onto two lines ("…(Serial" / "No.)"), pushing its value half a line down.
+      .filter((l) => !isLabel(l) && Math.abs(l.y - lab.y) < Math.min(14, Math.max(8, lab.h * 0.75)) && l.x > lab.x + 20 && l.x < nextLabelX)
       .sort((a, b) => a.x - b.x);
     let v = vals.map((l) => l.text).join(' ').trim();
     // Some layouts put label and value on one line: "(Serial No.) 261400290"
@@ -107,7 +147,37 @@ export function parseLines(lines, images) {
     out[lab.field] = v.replace(/\s+/g, ' ');
   }
 
+  // Fallback by position: some PDFs have the table labels as graphics (values typed over the form),
+  // so the values are found by their row. Rows are in A4 points after normalisation.
+  const ROWS = { job_number: 162, install_date_raw: 185, customer_name: 209, phone: 232, region: 255, site_type: 278, vin: 302, serial: 325 };
+  const VALID = {
+    job_number: (t) => /XPENG\s*\d{5,}/i.test(t),
+    install_date_raw: (t) => !!parseAnyDate(t),
+    phone: (t) => /\d{3}.*\d{3}/.test(t),
+    vin: (t) => VIN_RE.test(normalizeVin(t)),
+    serial: (t) => /\d{6,}/.test(t),
+  };
+  let byPosition = 0;
+  const shift = hasHeader ? top - 145 : 0; // heading centre is at y≈145 on the reference form
+  for (const [field, row] of Object.entries(ROWS)) {
+    if (out[field]) continue;
+    const rowY = row + shift;
+    const hit = tableLines
+      .filter((l) => !isLabel(l) && l.x >= 195 && l.x < 340 && Math.abs(l.y - rowY) < 9)
+      .sort((a, b) => Math.abs(a.y - rowY) - Math.abs(b.y - rowY))[0];
+    if (hit && (!VALID[field] || VALID[field](hit.text))) { out[field] = hit.text.replace(/\s+/g, ' ').trim(); byPosition++; }
+  }
+  if (!out.charger_code) {
+    const hit = tableLines.find((l) => !isLabel(l) && l.x >= 400 && Math.abs(l.y - ROWS.job_number) < 9);
+    if (hit) { out.charger_code = hit.text.trim(); byPosition++; }
+  }
+  out.layout = labels.length >= 5 ? 'standard' : byPosition ? 'no-labels' : 'unknown';
+
   for (const l of lines) {
+    if (l.y < 40) {
+      const j = l.text.match(/XPENG\s*\d{5,}/i);
+      if (j && !out.header_job) out.header_job = j[0].replace(/\s/g, '').toUpperCase();
+    }
     if (l.y < 40 && !out.report_printed_at) {
       const p = parsePrintStamp(l.text);
       if (p) out.report_printed_at = p;
@@ -115,7 +185,7 @@ export function parseLines(lines, images) {
     const u = l.text.match(/https?:\/\/ev\.rpdservice\.com\/\S+/);
     if (u) out.job_url = u[0];
   }
-  out.install_date = parseThaiDate(out.install_date_raw);
+  out.install_date = parseAnyDate(out.install_date_raw);
   out.vin = normalizeVin(out.vin);
   out.serial = String(out.serial || '').replace(/\s+/g, '');
   return out;
@@ -124,9 +194,9 @@ export function parseLines(lines, images) {
 // Picks the VIN photo: the image right above the caption "รูปหมายเลขตัวถัง (VinNo.)",
 // else the top-left photo of the 2×2 grid.
 export function pickVinImage(lines, images) {
-  const photos = images.filter((i) => i.y > 300 && i.w > 60 && i.h > 60);
+  const { bottom, photos } = formAnchors(lines, images);
   if (!photos.length) return null;
-  const cap = lines.find((l) => l.y > 300 && (l.text.includes('ตัวถัง') || /vin\s*no/i.test(l.text)));
+  const cap = lines.find((l) => l.y > bottom && (l.text.includes('ตัวถัง') || /vin\s*no/i.test(l.text)));
   if (cap) {
     const cx = cap.x + cap.w / 2;
     const above = photos
@@ -171,12 +241,19 @@ export function extractPage1(mupdf, bytes, maxSide = 1400) {
     for (const l of lines) l.text = cleanThai(l.text).replace(/\s+/g, ' ').trim();
     const cleanLines = dedupeLines(lines.filter((l) => l.text));
 
-    // Page 1 flattened into one picture (scan/screenshot) → no text layer; caller must OCR the page.
-    if (cleanLines.length < 5) {
+    // Page 1 flattened into one picture (scan/screenshot) → caller must OCR the page. Also covers
+    // scans with a scanner's garbage hidden text layer: a full-page image and no readable VIN/job.
+    const pageArea = 595 * (595 / ((bx1 - bx0) || 595)) * ((page.getBounds()[3] - page.getBounds()[1]) || 842);
+    const fullPageImage = images.some((i) => i.w * i.h > 0.8 * 595 * (pageArea / 595));
+    const scannedPage = () => {
       const pagePix = own(page.toPixmap(mupdf.Matrix.scale(2 * k, 2 * k), mupdf.ColorSpace.DeviceRGB, false, true));
       return { fields: {}, vinJpeg: null, pageJpeg: pagePix.asJPEG(80, false), scanned: true, pageCount };
-    }
+    };
+    if (cleanLines.length < 5) return scannedPage();
     const fields = parseLines(cleanLines, images);
+    // XPENG VINs are made in China, so they start with "L" (world manufacturer code L1N).
+    const trustworthy = /XPENG\s*\d{5,}/i.test(fields.job_number || '') || (VIN_RE.test(fields.vin || '') && /^L/.test(fields.vin));
+    if (fullPageImage && !trustworthy) return scannedPage();
 
     let vinJpeg = null;
     const vinImg = pickVinImage(cleanLines, images);

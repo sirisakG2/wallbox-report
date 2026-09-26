@@ -340,3 +340,4 @@ body.locked > :not(.login-screen) { display: none !important; }
 .tone-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 10px; vertical-align: 1px; background: var(--text-3); }
 .tone-dot.ok { background: var(--ok); } .tone-dot.bad { background: var(--bad); }
 .tone-dot.warn { background: var(--warn); } .tone-dot.info { background: var(--info); }
+.date-dialog { position: fixed; z-index: 51; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 420px; }

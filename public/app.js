@@ -53,6 +53,7 @@ const ISSUE_LABEL = {
   duplicate_vin: ['Duplicate VIN', 'warn'], filename_vin: ['File name VIN', 'info'], ocr_mismatch: ['VIN photo mismatch', 'bad'],
   ocr_failed: ['VIN photo unread', 'warn'], bad_date: ['Bad date', 'bad'], missing_vin: ['Missing VIN', 'bad'],
   scanned_page: ['Scanned page', 'info'], error: ['Error', 'bad'], vin_photo_wrong: ['Charger photo in VIN slot', 'warn'],
+  edited_pdf: ['PDF may be edited', 'bad'], suspicious_date: ['Suspicious date', 'warn'],
 };
 const issuePill = (t) => { const [l, c] = ISSUE_LABEL[t] || [t, 'neutral']; return `<span class="pill ${c}">${esc(l)}</span>`; };
 
@@ -406,7 +407,8 @@ function openRecord(r) {
   const rows = [
     ['VIN (primary key)', `<span class="mono">${esc(r.vin)}</span>`],
     ['VIN picture', `<span class="mono">${esc(r.vin_picture) || '–'}</span> ${matchPill(r.vin_photo_match)} ${readByPill(r.vin_read_by)}`],
-    ['Installation date', `${esc(fmtDate(r.install_date))} <span class="faint">(${esc(r.install_date_raw)})</span>`],
+    ['Installation date', `${esc(fmtDate(r.install_date)) || '<span class="pill bad">unreadable</span>'} <span class="faint">(PDF: ${esc(r.install_date_raw) || '–'})</span>
+      <button class="btn sm" data-edit-date="${esc(r.vin)}" data-current="${esc(r.install_date)}" style="margin-left:8px">Edit date</button>`],
     ['Job number', `<span class="mono">${esc(r.job_number)}</span>`],
     ['Charger / PO code', esc(r.charger_code)],
     ['Customer name', esc(r.customer_name)],
@@ -583,6 +585,7 @@ async function renderIssues(params) {
               <td>${i.pdf_file_id ? `<a href="${pdfUrl(i.pdf_file_id)}" target="_blank" rel="noopener" title="${esc(i.pdf_name)}">Open ${ICON.ext}</a>` : ''}</td>
               <td class="faint">${esc(fmtMonth(i.month))}</td>
               <td style="text-align:right;white-space:nowrap">
+                ${['bad_date', 'suspicious_date'].includes(i.type) && !i.resolved && i.vin ? `<button class="btn sm" data-edit-date="${esc(i.vin)}" data-current="">Fix date</button>` : ''}
                 ${i.type === 'duplicate_vin' && !i.resolved ? `<button class="btn sm" data-replace="${i.id}" title="Use this PDF's data for the VIN instead of the stored one">Use this PDF</button>` : ''}
                 <button class="btn sm" data-resolve="${i.id}" data-val="${i.resolved ? 0 : 1}">${i.resolved ? 'Reopen' : 'Resolve'}</button>
               </td>
@@ -699,10 +702,43 @@ async function exportExcel(batchId) {
   }
 }
 
+// ---------- installation date correction ----------
+function editDate(vin, current) {
+  const back = document.createElement('div');
+  back.className = 'drawer-backdrop';
+  back.style.zIndex = 50;
+  const box = document.createElement('div');
+  box.className = 'card card-pad date-dialog';
+  box.innerHTML = `
+    <h2 style="margin:0 0 4px;font-size:17px">Correct installation date</h2>
+    <p class="muted" style="margin:0 0 16px">VIN <span class="mono">${esc(vin)}</span> — the original PDF text is kept in the notes.</p>
+    <div class="field"><label>Installation date</label><input class="input lg" type="date" id="edDate" value="${esc(current || '')}" min="2015-01-01"></div>
+    <div class="row-actions" style="margin-top:18px;justify-content:flex-end">
+      <button class="btn" id="edCancel">Cancel</button><button class="btn primary" id="edSave">Save</button></div>`;
+  const close = () => { back.remove(); box.remove(); };
+  back.onclick = close;
+  document.body.append(back, box);
+  $('#edCancel', box).onclick = close;
+  $('#edDate', box).focus();
+  $('#edSave', box).onclick = async () => {
+    const v = $('#edDate', box).value;
+    if (!v) { toast('Choose a date', 'err'); return; }
+    try {
+      await api(`/api/records/${encodeURIComponent(vin)}`, { method: 'PATCH', body: { install_date: v } });
+      close();
+      $$('.drawer, .drawer-backdrop').forEach((x) => x.remove());
+      toast(`Date saved: ${fmtDate(v)}`);
+      route();
+    } catch (err) { toast(err.message, 'err'); }
+  };
+}
+
 // ---------- global wiring ----------
 document.addEventListener('click', (e) => {
   const g = e.target.closest('[data-go]');
   if (g) { e.preventDefault(); go(g.dataset.go, g.dataset.batch ? { batch: g.dataset.batch } : {}); return; }
+  const ed = e.target.closest('[data-edit-date]');
+  if (ed) { e.preventDefault(); editDate(ed.dataset.editDate, ed.dataset.current); return; }
   const sm = e.target.closest('[data-summary]');
   if (sm) { e.preventDefault(); openSummary(sm.dataset.summary).catch((err) => toast(err.message, 'err')); return; }
   const x = e.target.closest('[data-export]');
