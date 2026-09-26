@@ -82,3 +82,10 @@ CREATE TABLE IF NOT EXISTS batch_files (
   status    TEXT NOT NULL,   -- saved | duplicate | error
   PRIMARY KEY (batch_id, file_id)
 );
+
+-- Failed admin logins (brute-force guard).
+CREATE TABLE IF NOT EXISTS login_attempts (
+  ip TEXT NOT NULL,
+  at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_login_ip ON login_attempts(ip, at);

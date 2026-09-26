@@ -317,3 +317,19 @@ footer { border-top: 1px solid var(--border); }
 
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Login ---------- */
+.login-screen {
+  position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--bg-grad), var(--bg);
+}
+body.locked > :not(.login-screen) { display: none !important; }
+.login-card {
+  width: 400px; padding: 40px 36px 34px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 16px;
+}
+.login-logo { height: 22px; width: auto; align-self: flex-start; filter: var(--logo-filter); margin-bottom: 10px; }
+.login-card h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+.login-card p { margin: -12px 0 8px; color: var(--text-2); font-size: 12.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.login-error { color: var(--bad); background: var(--bad-soft); border-radius: 10px; padding: 9px 12px; font-size: 13px; }
+.login-foot { margin-top: 22px; color: var(--text-3); font-size: 12.5px; }

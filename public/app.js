@@ -649,10 +649,46 @@ checkVersion();
 setInterval(checkVersion, 2 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(); });
 
-// Signed-in email from Cloudflare Access (if present)
-fetch('/cdn-cgi/access/get-identity', { cache: 'no-store' })
-  .then((r) => (r.ok ? r.json() : null))
-  .then((id) => { if (id?.email) $('#userEmail').textContent = id.email; })
-  .catch(() => {});
+// ---------- sign-in ----------
+function showLogin(msg = '') {
+  document.body.classList.add('locked');
+  $('#loginScreen').hidden = false;
+  $('#loginError').hidden = !msg;
+  $('#loginError').textContent = msg;
+  setTimeout(() => $('#password').focus(), 50);
+}
+function hideLogin() {
+  document.body.classList.remove('locked');
+  $('#loginScreen').hidden = true;
+  $('#password').value = '';
+}
+window.addEventListener('auth-required', () => showLogin('Your session has ended — please sign in again.'));
 
-route();
+$('#loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = $('#loginBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Signing in…';
+  try {
+    await api('/api/auth/login', { method: 'POST', body: { password: $('#password').value } });
+    hideLogin();
+    route();
+  } catch (err) {
+    showLogin(err.message);
+    $('#password').select();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+  }
+};
+$('#logoutBtn').onclick = async () => {
+  if (state.importing && !confirm('An import is running. Sign out anyway?')) return;
+  state.importing?.ctrl.abort();
+  await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  view.innerHTML = '';
+  showLogin();
+};
+
+api('/api/auth/session')
+  .then((s) => { if (s.authenticated) { if (s.local) $('#logoutBtn').hidden = true; route(); } else showLogin(); })
+  .catch(() => showLogin());
