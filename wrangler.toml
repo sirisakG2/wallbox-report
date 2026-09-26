@@ -8,7 +8,7 @@ binding = "AI"
 [[d1_databases]]
 binding = "DB"
 database_name = "wallbox"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "3208295b-3655-44e9-b5ca-4a553cf479ba"
 
 [vars]
 GITHUB_REPO = "sirisakG2/wallbox-report"
