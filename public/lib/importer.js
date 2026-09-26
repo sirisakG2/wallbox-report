@@ -25,36 +25,27 @@ export function suggestMonth(title, now = new Date()) {
 }
 
 // ---------- MuPDF worker pool ----------
+// A worker is replaced after a very large PDF or a memory error: WASM memory never shrinks, so a
+// worker that once held a 400 MB file would keep that memory for the rest of the import.
+const RECYCLE_BYTES = 120 * 1024 * 1024;
+
 class PdfPool {
   constructor(size) {
     this.size = size;
-    this.workers = [];
     this.idle = [];
     this.waiters = [];
-    this.pending = new Map();
+    this.all = new Set();
     this.seq = 0;
   }
-  async start() {
-    const boot = [];
-    for (let i = 0; i < this.size; i++) {
+  spawn() {
+    return new Promise((resolve, reject) => {
       const w = new Worker(new URL('./pdf-worker.js', import.meta.url), { type: 'module' });
-      boot.push(new Promise((resolve, reject) => {
-        w.onerror = (e) => reject(new Error(`PDF engine failed to load: ${e.message || 'network error'}`));
-        w.onmessage = ({ data }) => {
-          if (data.ready) { w.onmessage = (ev) => this.onMessage(w, ev.data); resolve(); }
-        };
-      }));
-      this.workers.push(w);
-    }
-    await Promise.all(boot);
-    this.idle = [...this.workers];
+      w.onerror = (e) => reject(new Error(`PDF engine failed to load: ${e.message || 'network error'}`));
+      w.onmessage = ({ data }) => { if (data.ready) { w.onmessage = null; this.all.add(w); resolve(w); } };
+    });
   }
-  onMessage(w, data) {
-    const p = this.pending.get(data.id);
-    this.pending.delete(data.id);
-    this.release(w);
-    if (!p) return;
-    if (data.ok) p.resolve(data); else p.reject(new Error(data.error));
+  async start() {
+    this.idle = await Promise.all(Array.from({ length: this.size }, () => this.spawn()));
   }
   release(w) {
     const next = this.waiters.shift();
@@ -64,15 +55,28 @@ class PdfPool {
     const w = this.idle.pop();
     return w ? Promise.resolve(w) : new Promise((r) => this.waiters.push(r));
   }
+  async replace(w) {
+    this.all.delete(w);
+    w.terminate();
+    try { this.release(await this.spawn()); } catch { /* pool shrinks by one */ }
+  }
   async parse(buffer) {
     const w = await this.acquire();
     const id = ++this.seq;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+    const big = buffer.byteLength > RECYCLE_BYTES;
+    const data = await new Promise((resolve) => {
+      w.onmessage = ({ data: d }) => { if (d.id === id) resolve(d); };
+      w.onerror = (e) => resolve({ ok: false, error: e.message || 'PDF worker crashed' });
       w.postMessage({ id, buffer }, [buffer]);
     });
+    w.onmessage = null;
+    w.onerror = null;
+    const memoryError = !data.ok && /malloc|memory|out of bounds|abort/i.test(data.error);
+    if (big || memoryError) this.replace(w); else this.release(w);
+    if (!data.ok) throw new Error(data.error);
+    return data;
   }
-  stop() { this.workers.forEach((w) => w.terminate()); }
+  stop() { this.all.forEach((w) => w.terminate()); this.all.clear(); }
 }
 
 async function withRetry(fn, tries = 3) {

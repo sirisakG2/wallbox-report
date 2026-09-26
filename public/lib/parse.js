@@ -137,12 +137,17 @@ export function pickVinImage(lines, images) {
   return [...photos].sort((a, b) => a.y - b.y || a.x - b.x)[0];
 }
 
-// Full extraction with a MuPDF module. Returns { fields, vinJpeg (Uint8Array|null), pageCount }.
+// Full extraction with a MuPDF module. Returns { fields, vinJpeg, pageJpeg, scanned, pageCount }.
+// Every MuPDF object is destroyed explicitly: relying on the garbage collector exhausts the WASM heap
+// after a large (hundreds of MB) PDF and makes every following file fail with "malloc failed".
 export function extractPage1(mupdf, bytes, maxSide = 1400) {
-  const doc = mupdf.Document.openDocument(bytes, 'application/pdf');
+  const owned = [];
+  const own = (o) => { if (o) owned.push(o); return o; };
+  const doc = own(mupdf.Document.openDocument(bytes, 'application/pdf'));
   try {
-    const page = doc.loadPage(0);
-    const st = page.toStructuredText('preserve-images');
+    const pageCount = doc.countPages();
+    const page = own(doc.loadPage(0));
+    const st = own(page.toStructuredText('preserve-images'));
     const lines = [];
     const images = [];
     const imageObjs = [];
@@ -150,7 +155,7 @@ export function extractPage1(mupdf, bytes, maxSide = 1400) {
       onImageBlock(bbox, transform, image) {
         const [x0, y0, x1, y1] = bbox;
         images.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, index: imageObjs.length });
-        imageObjs.push(image);
+        imageObjs.push(own(image));
       },
       beginLine(bbox) {
         lines.push({ x: bbox[0], y: bbox[1], w: bbox[2] - bbox[0], h: bbox[3] - bbox[1], text: '' });
@@ -168,25 +173,25 @@ export function extractPage1(mupdf, bytes, maxSide = 1400) {
 
     // Page 1 flattened into one picture (scan/screenshot) → no text layer; caller must OCR the page.
     if (cleanLines.length < 5) {
-      const pagePix = page.toPixmap(mupdf.Matrix.scale(2 * k, 2 * k), mupdf.ColorSpace.DeviceRGB, false, true);
-      return { fields: {}, vinJpeg: null, pageJpeg: pagePix.asJPEG(80, false), scanned: true, pageCount: doc.countPages() };
+      const pagePix = own(page.toPixmap(mupdf.Matrix.scale(2 * k, 2 * k), mupdf.ColorSpace.DeviceRGB, false, true));
+      return { fields: {}, vinJpeg: null, pageJpeg: pagePix.asJPEG(80, false), scanned: true, pageCount };
     }
     const fields = parseLines(cleanLines, images);
 
     let vinJpeg = null;
     const vinImg = pickVinImage(cleanLines, images);
     if (vinImg) {
-      let pix = imageObjs[vinImg.index].toPixmap();
-      if (pix.getAlpha()) pix = pix.convertToColorSpace(mupdf.ColorSpace.DeviceRGB, false);
+      let pix = own(imageObjs[vinImg.index].toPixmap());
+      if (pix.getAlpha()) pix = own(pix.convertToColorSpace(mupdf.ColorSpace.DeviceRGB, false));
       const side = Math.max(pix.getWidth(), pix.getHeight());
       if (side > maxSide) {
-        pix = pix.warp([[0, 0], [pix.getWidth(), 0], [pix.getWidth(), pix.getHeight()], [0, pix.getHeight()]],
-          Math.round(pix.getWidth() * maxSide / side), Math.round(pix.getHeight() * maxSide / side));
+        pix = own(pix.warp([[0, 0], [pix.getWidth(), 0], [pix.getWidth(), pix.getHeight()], [0, pix.getHeight()]],
+          Math.round(pix.getWidth() * maxSide / side), Math.round(pix.getHeight() * maxSide / side)));
       }
-      vinJpeg = pix.asJPEG(85, false);
+      vinJpeg = pix.asJPEG(85, false); // a copy, safe after destroy
     }
-    return { fields, vinJpeg, pageJpeg: null, scanned: false, pageCount: doc.countPages() };
+    return { fields, vinJpeg, pageJpeg: null, scanned: false, pageCount };
   } finally {
-    doc.destroy?.();
+    for (const o of owned.reverse()) { try { o.destroy(); } catch { /* already freed */ } }
   }
 }
