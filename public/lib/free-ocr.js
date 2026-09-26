@@ -1,65 +1,45 @@
-// Free, on-device VIN check using the browser's TextDetector (Shape Detection API).
-// In Chrome on macOS this runs Apple's text recognition — no Cloudflare AI neurons are used.
-// Needs chrome://flags/#enable-experimental-web-platform-features; without it everything goes to AI.
-import { normalizeVin } from './parse.js';
+// Free VIN photo check on this computer (PaddleOCR in background workers) — no Cloudflare AI neurons.
+// Works on any PC and browser without settings. First use downloads ~26 MB of models/runtime
+// from the jsDelivr CDN; the browser caches them afterwards.
 
-let detector = null;
-let status = null; // { available, reason }
+const WORKERS = 2;
+let pool = null;
+let status = null; // Promise<{ available, reason }>
+let seq = 0;
 
-export async function freeOcrStatus() {
-  if (status) return status;
-  if (!('TextDetector' in self)) {
-    status = { available: false, reason: 'TextDetector not available in this browser' };
-    return status;
-  }
-  try {
-    detector = new self.TextDetector();
-    // Smoke test: some builds expose the API but have no backend.
-    const c = new OffscreenCanvas(240, 60);
-    const g = c.getContext('2d');
-    g.fillStyle = '#fff'; g.fillRect(0, 0, 240, 60);
-    g.fillStyle = '#000'; g.font = 'bold 36px Arial'; g.fillText('TEST 123', 10, 44);
-    await detector.detect(c);
-    status = { available: true, reason: '' };
-  } catch (e) {
-    detector = null;
-    status = { available: false, reason: `TextDetector failed: ${e.message}` };
+function spawn() {
+  const w = new Worker(new URL('./ocr-worker.js', import.meta.url), { type: 'module' });
+  const pending = new Map();
+  w.onmessage = ({ data }) => { const p = pending.get(data.id); pending.delete(data.id); p?.(data); };
+  w.onerror = (e) => { for (const p of pending.values()) p({ ok: false, error: e.message || 'OCR worker crashed' }); pending.clear(); };
+  const call = (msg, transfer = []) => new Promise((resolve) => {
+    const id = ++seq;
+    pending.set(id, resolve);
+    w.postMessage({ ...msg, id }, transfer);
+  });
+  return { w, call, busy: 0 };
+}
+
+export function freeOcrStatus() {
+  if (!status) {
+    pool = Array.from({ length: WORKERS }, spawn);
+    status = pool[0].call({ type: 'status' }).then((r) => (r.ok
+      ? { available: true, reason: '' }
+      : { available: false, reason: r.error || 'free reader failed to load' }));
   }
   return status;
 }
 
-const CHARGER_RE = /MANUFACTURER|CHINT|CONVERGY|RATED|EQUIPMENT/;
-
-function rotated(bitmap, deg) {
-  const swap = deg === 90 || deg === 270;
-  const c = new OffscreenCanvas(swap ? bitmap.height : bitmap.width, swap ? bitmap.width : bitmap.height);
-  const g = c.getContext('2d');
-  g.translate(c.width / 2, c.height / 2);
-  g.rotate((deg * Math.PI) / 180);
-  g.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
-  return c;
-}
-
 // Returns { result: 'match' | 'charger' | 'unknown', text }.
-// 'match' only when the exact 17-character PDF VIN is found in the photo — anything else is left to AI.
 export async function freeReadVin(jpegBytes, expectedVin) {
   if (!(await freeOcrStatus()).available) return { result: 'unknown', text: '' };
-  const vin = normalizeVin(expectedVin);
-  const bitmap = await createImageBitmap(new Blob([jpegBytes], { type: 'image/jpeg' }));
-  let all = '';
+  const worker = pool.reduce((a, b) => (b.busy < a.busy ? b : a));
+  worker.busy++;
   try {
-    for (const deg of [0, 270, 90, 180]) {
-      const found = await detector.detect(deg ? rotated(bitmap, deg) : bitmap);
-      const text = found.map((t) => t.rawValue).join(' ');
-      all += ` ${text}`;
-      const flat = normalizeVin(text);
-      if (vin.length === 17 && flat.includes(vin)) return { result: 'match', text: text.trim() };
-      if (deg === 0 && CHARGER_RE.test(text.toUpperCase()) && !/L1NN/.test(flat)) {
-        return { result: 'charger', text: text.trim() };
-      }
-    }
+    const copy = jpegBytes.slice(); // the caller still needs the JPEG if AI is used afterwards
+    const r = await worker.call({ type: 'read', jpeg: copy, expected: expectedVin }, [copy.buffer]);
+    return r.ok ? { result: r.result, text: r.text } : { result: 'unknown', text: '' };
   } finally {
-    bitmap.close();
+    worker.busy--;
   }
-  return { result: 'unknown', text: all.trim() };
 }

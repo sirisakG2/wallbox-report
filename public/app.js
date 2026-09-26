@@ -243,10 +243,11 @@ function renderImport(params) {
       ex.hidden = !existing;
       if (existing) ex.innerHTML = `This folder was imported before as <strong>${esc(fmtMonth(existing.month, true))}</strong> — ${fmtN(existing.processed_count)} of ${fmtN(existing.pdf_count)} files processed. Starting again resumes with the remaining files${existing.processed_count ? ' and, with “Retry unread / failed”, re-reads unread VIN photos' : ''}.`;
       $('#folderBox', el).hidden = false;
+      $('#freeStatus', el).innerHTML = '<span class="pill neutral">Free VIN reader loading…</span>';
       const fs = await freeOcrStatus();
       $('#freeStatus', el).innerHTML = fs.available
-        ? '<span class="pill ok">Free VIN reader ON</span> <span class="muted">VIN photos are checked on this computer first; AI is used only for unclear photos.</span>'
-        : `<span class="pill warn">Free VIN reader OFF</span> <span class="muted">Every VIN photo uses AI neurons. In Chrome open <code class="mono">chrome://flags/#enable-experimental-web-platform-features</code>, set it to Enabled and relaunch Chrome.</span>`;
+        ? '<span class="pill ok">Free VIN reader ON</span> <span class="muted">VIN photos are read on this computer first; AI is used only for unclear photos.</span>'
+        : `<span class="pill warn">Free VIN reader OFF</span> <span class="muted">${esc(fs.reason)} — every VIN photo will use AI.</span>`;
     } catch (e) {
       toast(e.message, 'err');
     } finally {

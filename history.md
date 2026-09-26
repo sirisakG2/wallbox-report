@@ -13,6 +13,7 @@ Live: https://wallbox.anotai.net (also wallbox-report.pages.dev) · Repo: sirisa
 | `0cf6bb2` | Import summary per month (7-row result table, rows link to records/issues). |
 | `d536026` | Free on-device VIN reader first, AI only for unclear photos; charger photo in VIN slot flagged; pause cleanly at AI daily limit; "Retry unread / failed"; 5 files in parallel; "Read by" (Free/AI) column. |
 | `d1feb95` | Fixed memory leak that made files fail after a very large (410 MB) PDF. |
+| next | Free VIN reader replaced: PaddleOCR (PP-OCRv4) running in the browser on any PC (Dell/Windows or Mac), no Chrome setting, no Apple engine. Tested on 113 June photos: 91 confirmed free, 8 charger photos, 14 to AI; ~0.9 s/photo in the browser. When the AI allowance runs out the import continues with free-only work and leaves AI-needing files for the next run. |
 
 ## Data — June 2026 (503 PDFs)
 - First import: 485 records saved; stopped reading photos when the free Workers AI allowance (10,000 neurons/day) ran out.
@@ -21,7 +22,7 @@ Live: https://wallbox.anotai.net (also wallbox-report.pages.dev) · Repo: sirisa
 
 ## Open items
 - June: 24 files still need AI (8 unclear photos, 16 scanned pages) — rerun import with "Retry unread / failed" after 07:00.
-- Free reader in the web app needs Chrome flag `chrome://flags/#enable-experimental-web-platform-features`.
+- First import on a new PC downloads ~26 MB (free reader models, cached afterwards).
 - Decide: PDF install date is often 1–15 days later than the submission Excel — allow a tolerance in Compare or keep strict?
 
 ## Notes
