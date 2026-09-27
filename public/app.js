@@ -2,7 +2,8 @@
 import { api } from './lib/api.js';
 import { planFolder, runImport, suggestMonth } from './lib/importer.js';
 import { freeOcrStatus } from './lib/free-ocr.js';
-import { downloadWorkbook } from './lib/report.js';
+import { downloadProblemsWorkbook, downloadWorkbook } from './lib/report.js';
+import { PROBLEM_INFO, PROBLEM_TYPES, whatHappened } from './lib/problems.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -898,38 +899,61 @@ async function renderIssues(params) {
   if (text) q.set('q', text);
   if (!showResolved) q.set('resolved', '0');
   const { issues } = await api(`/api/issues?${q}`);
-  const detailText = (i) => { try { const d = JSON.parse(i.detail); return d?.message || i.detail; } catch { return i.detail; } };
+  // Counts per type for the explanation cards (open only, this month).
+  const { issues: openAll } = await api(`/api/issues?${batch ? `batch=${batch}&` : ''}scope=other&resolved=0`);
+  const count = (t) => openAll.filter((i) => i.type === t).length;
+  const info = (t) => PROBLEM_INFO[t] || { name: (ISSUE_LABEL[t] || [t])[0], th: '', tone: 'neutral', meaning: '', action: '' };
 
   view.innerHTML = `
-    <div class="view-head"><div><h1>Other problems</h1><p>Problems that ① Check PDF and ② Check Excel do not show: edited reports, duplicate VINs, scanned pages, charger photo in the VIN slot, failed files and PDFs updated in Drive. Check them and mark resolved.</p></div></div>
-    <div class="card">
+    <div class="view-head"><div><h1>Other problems</h1><p>Things ① Check PDF and ② Check Excel do not show. Each card explains the problem and what to do — click a card to see those files.</p></div>
+      <button class="btn primary" id="probExport">${ICON.download} Export detailed Excel</button></div>
+    <div class="problem-cards">
+      ${PROBLEM_TYPES.map((t) => `
+        <button class="card problem-card ${type === t ? 'active' : ''} tone-${info(t).tone}" data-ptype="${t}">
+          <div class="pc-head"><b>${esc(info(t).name)}</b><span class="pc-count">${fmtN(count(t))}</span></div>
+          <div class="pc-th">${esc(info(t).th)}</div>
+          <div class="pc-text">${esc(info(t).meaning)}</div>
+          <div class="pc-todo"><span>What to do</span>${esc(info(t).action)}</div>
+        </button>`).join('')}
+    </div>
+    <div class="card section-gap">
       <div class="toolbar">
         <div class="field"><label>Month</label><select class="select" id="iBatch">${monthOptions(batch)}</select></div>
-        <div class="field"><label>Type</label><select class="select" id="iType"><option value="">All other problems</option>
-          ${OTHER_TYPES.map((k) => `<option value="${k}" ${type === k ? 'selected' : ''}>${ISSUE_LABEL[k][0]}</option>`).join('')}
-          ${type && !OTHER_TYPES.includes(type) ? `<option value="${type}" selected>${(ISSUE_LABEL[type] || [type])[0]}</option>` : ''}</select></div>
+        <div class="field"><label>Problem</label><select class="select" id="iType"><option value="">All other problems</option>
+          ${PROBLEM_TYPES.map((k) => `<option value="${k}" ${type === k ? 'selected' : ''}>${info(k).name}</option>`).join('')}
+          ${type && !PROBLEM_TYPES.includes(type) ? `<option value="${type}" selected>${(ISSUE_LABEL[type] || [type])[0]}</option>` : ''}</select></div>
         ${text ? `<button class="chip active" id="iClearQ" title="Remove text filter">“${esc(text)}” ✕</button>` : ''}
         <label class="check" style="height:40px"><input type="checkbox" id="iResolved" ${showResolved ? 'checked' : ''}> Show resolved</label>
       </div>
       <div class="table-wrap">
         ${issues.length ? `<table>
-          <thead><tr><th>Type</th><th>VIN</th><th>Detail</th><th>PDF</th><th>Month</th><th style="text-align:right">Action</th></tr></thead>
+          <thead><tr><th>Problem</th><th>Month</th><th>VIN</th><th>What happened</th><th>What to do</th><th>PDF</th><th style="text-align:right">Action</th></tr></thead>
           <tbody>${issues.map((i) => `
             <tr style="${i.resolved ? 'opacity:.5' : ''}">
-              <td>${issuePill(i.type)}</td>
+              <td><span class="pill ${info(i.type).tone}">${esc(info(i.type).name)}</span></td>
+              <td><span class="month-chip">${esc(fmtMonth(i.month))}</span></td>
               <td class="mono">${esc(i.vin)}</td>
-              <td style="max-width:520px">${esc(detailText(i))}</td>
+              <td style="max-width:380px">${esc(whatHappened(i))}</td>
+              <td style="max-width:320px" class="muted">${esc(info(i.type).action)}</td>
               <td>${i.pdf_file_id ? `<a href="${pdfUrl(i.pdf_file_id)}" target="_blank" rel="noopener" title="${esc(i.pdf_name)}">Open ${ICON.ext}</a>` : ''}</td>
-              <td class="faint">${esc(fmtMonth(i.month))}</td>
               <td style="text-align:right;white-space:nowrap">
                 ${['bad_date', 'suspicious_date'].includes(i.type) && !i.resolved && i.vin ? `<button class="btn sm" data-edit-date="${esc(i.vin)}" data-current="">Fix date</button>` : ''}
                 ${i.type === 'duplicate_vin' && !i.resolved ? `<button class="btn sm" data-replace="${i.id}" title="Use this PDF's data for the VIN instead of the stored one">Use this PDF</button>` : ''}
                 <button class="btn sm" data-resolve="${i.id}" data-val="${i.resolved ? 0 : 1}">${i.resolved ? 'Reopen' : 'Resolve'}</button>
               </td>
-            </tr>`).join('')}</tbody></table>` : '<div class="empty">No other problems — nice.</div>'}
+            </tr>`).join('')}</tbody></table>` : '<div class="empty">No problems here — nice.</div>'}
       </div>
       <div class="pager"><span>${fmtN(issues.length)} problem${issues.length === 1 ? '' : 's'}</span></div>
     </div>`;
+  $$('[data-ptype]').forEach((c) => { c.onclick = () => go('issues', { batch, type: type === c.dataset.ptype ? '' : c.dataset.ptype }); });
+  $('#probExport').onclick = async () => {
+    if (!window.ExcelJS) { toast('Excel library is still loading, try again', 'err'); return; }
+    const b = state.batches.find((x) => String(x.id) === String(batch));
+    toast('Building Excel…');
+    try {
+      await downloadProblemsWorkbook(window.ExcelJS, { batchId: b ? b.id : null, label: b ? fmtMonth(b.month, true) : 'All months', fileTag: b ? b.month : 'all-months' });
+    } catch (e) { toast(`Export failed: ${e.message}`, 'err'); }
+  };
   const nav = (keepQ = true) => go('issues', { batch: $('#iBatch').value, type: $('#iType').value, q: keepQ ? text : '', resolved: $('#iResolved').checked ? 'all' : '' });
   if (text) $('#iClearQ').onclick = () => nav(false);
   $('#iBatch').onchange = () => nav();

@@ -1,5 +1,6 @@
 // Builds the export workbook (Records, Compare vs Reference, Issues, Summary) with ExcelJS.
 import { api } from './api.js';
+import { PROBLEM_INFO, PROBLEM_TYPES, whatHappened } from './problems.js';
 
 const HEAD_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF141416' } };
 const RED_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE2E1' } };
@@ -244,6 +245,165 @@ export async function downloadWorkbook(ExcelJS, opts) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `wallbox_${opts.kind || 'all'}_${opts.fileTag}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ---------- Detailed "Other problems" workbook (with explanations in English and Thai) ----------
+
+const WRAP = { wrapText: true, vertical: 'top' };
+
+export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) {
+  const q = batchId ? `batch=${batchId}&` : '';
+  const [{ issues }, { records }, { batches }] = await Promise.all([
+    api(`/api/issues?${q}scope=other&resolved=all`),
+    api(`/api/records?size=all`),
+    api('/api/batches'),
+  ]);
+  const byFile = new Map(records.map((r) => [r.pdf_file_id, r]));
+  const byVin = new Map(records.map((r) => [r.vin, r]));
+  const recOf = (i) => byFile.get(i.pdf_file_id) || byVin.get(i.vin) || null;
+  const batchOf = new Map(batches.map((b) => [b.id, b]));
+  const excelLink = (id) => (id ? { text: 'Open Excel', hyperlink: `https://drive.google.com/file/d/${id}/view` } : '');
+  const found = (at) => (at ? String(at).slice(0, 16).replace('T', ' ') : '');
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Xpeng Thailand — Wall Box Installation Records';
+  wb.created = new Date();
+
+  // --- Read me
+  const rm = wb.addWorksheet('Read me', { views: [{ showGridLines: false }] });
+  rm.columns = [{ width: 26 }, { width: 22 }, { width: 55 }, { width: 55 }, { width: 45 }, { width: 55 }, { width: 55 }, { width: 8 }, { width: 10 }];
+  const t = rm.addRow(['Other problems — explanation and details']);
+  t.font = { ...FONT, size: 16, bold: true };
+  rm.addRow([`Export: ${label} · generated ${new Date().toLocaleString('en-GB')}`]).font = { ...FONT, color: { argb: 'FF666666' } };
+  rm.addRow([]);
+  for (const line of [
+    'These are problems that ① Check PDF (file name VIN vs inside the PDF) and ② Check Excel (Excel rows vs PDF) do not show.',
+    'ปัญหาในไฟล์นี้คือปัญหาที่ Check 1 และ Check 2 ไม่ได้แสดง ต้องให้ผู้ดูแลตรวจเอง',
+    'How to use: 1) read the explanation of each problem below · 2) go to the sheet of that problem (tabs at the bottom) · 3) open the PDF link, check, and fix or mark it resolved in the app (menu "Other problems").',
+    'วิธีใช้: 1) อ่านคำอธิบายแต่ละปัญหาด้านล่าง 2) ไปที่ชีตของปัญหานั้น (แท็บด้านล่าง) 3) คลิกลิงก์ PDF ตรวจสอบ แล้วแก้ไขหรือกด Resolve ในแอป (เมนู Other problems)',
+  ]) { const r = rm.addRow([line]); r.font = FONT; rm.mergeCells(r.number, 1, r.number, 9); r.alignment = WRAP; r.height = 30; }
+  rm.addRow([]);
+  const head = rm.addRow(['Problem', 'ปัญหา', 'What it means', 'ความหมาย', 'Why it matters', 'What to do', 'สิ่งที่ต้องทำ', 'Open', 'Resolved']);
+  head.eachCell((c) => { c.fill = HEAD_FILL; c.font = { ...FONT, bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = WRAP; });
+  for (const type of PROBLEM_TYPES) {
+    const p = PROBLEM_INFO[type];
+    const list = issues.filter((i) => i.type === type);
+    const r = rm.addRow([p.name, p.th, p.meaning, p.meaning_th, `${p.why}\n${p.why_th}`, p.action, p.action_th,
+      list.filter((i) => !i.resolved).length, list.filter((i) => i.resolved).length]);
+    r.font = FONT;
+    r.alignment = WRAP;
+    r.height = 105;
+    r.getCell(1).font = { ...FONT, bold: true };
+    r.getCell(8).fill = list.some((i) => !i.resolved) ? AMBER_FILL : GREEN_FILL;
+  }
+
+  // --- All problems
+  const common = (i) => {
+    const r = recOf(i);
+    const b = batchOf.get(i.batch_id);
+    return {
+      problem: PROBLEM_INFO[i.type]?.name || i.type,
+      status: i.resolved ? 'Resolved' : 'Open',
+      month: i.month || b?.month || '',
+      vin: i.vin,
+      customer: r?.customer_name || '',
+      job: r?.job_number || '',
+      pdf_name: i.pdf_name,
+      pdf_link: driveLink(i.pdf_file_id),
+      excel_row: r?.ref_row ? `${r.ref_sheet_name || ''} · row ${r.ref_row}` : '',
+      excel_link: excelLink(r?.ref_file_id || b?.reference_file_id),
+      what: whatHappened(i),
+      todo: PROBLEM_INFO[i.type]?.action || '',
+      found: found(i.created_at),
+    };
+  };
+  const commonCols = [
+    { header: 'Problem', key: 'problem', width: 22 },
+    { header: 'Status', key: 'status', width: 10 },
+    { header: 'Month', key: 'month', width: 9 },
+    { header: 'VIN', key: 'vin', width: 21 },
+    { header: 'Customer (PDF)', key: 'customer', width: 28 },
+    { header: 'Job number (PDF)', key: 'job', width: 15 },
+  ];
+  const tailCols = [
+    { header: 'What happened', key: 'what', width: 60, style: { alignment: WRAP } },
+    { header: 'What to do', key: 'todo', width: 60, style: { alignment: WRAP } },
+    { header: 'PDF file', key: 'pdf_name', width: 38 },
+    { header: 'PDF link', key: 'pdf_link', width: 10 },
+    { header: 'Excel row', key: 'excel_row', width: 18 },
+    { header: 'Excel link', key: 'excel_link', width: 11 },
+    { header: 'Found (UTC)', key: 'found', width: 16 },
+  ];
+  const statusFill = (row, i) => { row.getCell('status').fill = i.resolved ? GREEN_FILL : AMBER_FILL; };
+  const sorted = [...issues].sort((a, b) => a.resolved - b.resolved || PROBLEM_TYPES.indexOf(a.type) - PROBLEM_TYPES.indexOf(b.type));
+  addSheet(wb, 'All problems', [...commonCols, ...tailCols], sorted.map(common), (row, x, i = sorted[row.number - 2]) => statusFill(row, i));
+
+  // --- One sheet per problem type, with the columns that matter for it
+  const extra = {
+    edited_pdf: {
+      cols: [{ header: 'Job at top of page', key: 'header_job', width: 16 }, { header: 'Job in table', key: 'table_job', width: 16 },
+        { header: 'Report printed', key: 'printed', width: 16 }, { header: 'Install date (PDF)', key: 'date', width: 14 }],
+      row: (i, r) => {
+        const m = /header shows job (\S+) but the table says (\S+)/.exec(i.detail || '');
+        return { header_job: m?.[1] || '(labels are pictures)', table_job: m?.[2] || r?.job_number || '', printed: r?.report_printed_at || '', date: r?.install_date || '' };
+      },
+    },
+    duplicate_vin: {
+      cols: [{ header: 'Kept record: PDF', key: 'kept_pdf', width: 38 }, { header: 'Kept: month', key: 'kept_month', width: 10 }, { header: 'Kept: link', key: 'kept_link', width: 10 },
+        { header: 'Kept: customer', key: 'kept_customer', width: 26 }, { header: 'This PDF: customer', key: 'this_customer', width: 26 },
+        { header: 'This PDF: install date', key: 'this_date', width: 14 }, { header: 'This PDF: job', key: 'this_job', width: 15 }],
+      row: (i) => {
+        let d = {};
+        try { d = JSON.parse(i.detail); } catch { /* old format */ }
+        const kept = byVin.get(i.vin);
+        return { kept_pdf: d.existing?.pdf_name || kept?.pdf_name || '', kept_month: d.existing?.month || kept?.month || '',
+          kept_link: driveLink(d.existing?.pdf_file_id || kept?.pdf_file_id), kept_customer: kept?.customer_name || '',
+          this_customer: d.record?.customer_name || '', this_date: d.record?.install_date || '', this_job: d.record?.job_number || '' };
+      },
+    },
+    scanned_page: {
+      cols: [{ header: 'Install date (AI read)', key: 'date', width: 14 }, { header: 'VIN photo (AI read)', key: 'photo', width: 21 },
+        { header: 'Notes', key: 'notes', width: 50, style: { alignment: WRAP } }],
+      row: (i, r) => ({ date: r?.install_date || '', photo: r?.vin_picture || '', notes: r?.notes || '' }),
+    },
+    vin_photo_wrong: {
+      cols: [{ header: 'Text seen in the photo', key: 'seen', width: 50, style: { alignment: WRAP } }],
+      row: (i, r) => ({ seen: r?.ocr_raw || '' }),
+    },
+    error: { cols: [], row: () => ({}) },
+    file_updated: {
+      cols: [{ header: 'Updated in Drive', key: 'when', width: 16 }],
+      row: (i, r) => ({ when: r?.file_status_at || '' }),
+    },
+  };
+  for (const type of PROBLEM_TYPES) {
+    const list = sorted.filter((i) => i.type === type);
+    if (!list.length) continue;
+    const x = extra[type];
+    const ws = addSheet(wb, PROBLEM_INFO[type].sheet, [...commonCols, ...x.cols, ...tailCols],
+      list.map((i) => ({ ...common(i), ...x.row(i, recOf(i)) })), (row) => statusFill(row, list[row.number - 2]));
+    // Explanation above the table.
+    ws.spliceRows(1, 0, [`${PROBLEM_INFO[type].name} — ${PROBLEM_INFO[type].th}`], [PROBLEM_INFO[type].meaning], [`What to do: ${PROBLEM_INFO[type].action}`], []);
+    for (const n of [1, 2, 3]) { ws.mergeCells(n, 1, n, 8); ws.getRow(n).alignment = WRAP; ws.getRow(n).font = { ...FONT, bold: n === 1, size: n === 1 ? 13 : 10 }; }
+    ws.getRow(2).height = 30;
+    ws.getRow(3).height = 30;
+    ws.views = [{ state: 'frozen', ySplit: 5 }];
+    ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: ws.columnCount } };
+  }
+  return wb;
+}
+
+export async function downloadProblemsWorkbook(ExcelJS, opts) {
+  const wb = await buildProblemsWorkbook(ExcelJS, opts);
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `wallbox_problems_${opts.fileTag}_${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();
