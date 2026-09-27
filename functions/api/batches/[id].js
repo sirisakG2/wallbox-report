@@ -1,5 +1,6 @@
 // PATCH  /api/batches/:id  → update month / status
 // DELETE /api/batches/:id  → delete the month and everything imported with it
+import { bump } from '../../../lib/cache.js';
 import { bad, json } from '../../../lib/server.js';
 
 export async function onRequestPatch({ params, request, env }) {
@@ -16,8 +17,10 @@ export async function onRequestPatch({ params, request, env }) {
     sets.push('status = ?'); vals.push(body.status);
   }
   if (!sets.length) return bad('Nothing to update');
-  await env.DB.prepare(`UPDATE batches SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = ?`)
-    .bind(...vals, id).run();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE batches SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = ?`).bind(...vals, id),
+    bump(env.DB),
+  ]);
   return json({ ok: true });
 }
 
@@ -29,6 +32,7 @@ export async function onRequestDelete({ params, env }) {
     env.DB.prepare('DELETE FROM issues WHERE batch_id = ?').bind(id),
     env.DB.prepare('DELETE FROM batch_files WHERE batch_id = ?').bind(id),
     env.DB.prepare('DELETE FROM batches WHERE id = ?').bind(id),
+    bump(env.DB),
   ]);
   return json({ ok: true });
 }

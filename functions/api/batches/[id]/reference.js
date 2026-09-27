@@ -1,5 +1,6 @@
 // POST /api/batches/:id/reference — replace the stored submission-Excel rows for this month.
 // Body: { name, fileId, rows: [{sheet, sheet_name, row_no, vin, case_number, customer_name, install_date, charger_model, car_model, serial, team, po_ref}] }
+import { bump } from '../../../../lib/cache.js';
 import { bad, json, runBatched } from '../../../../lib/server.js';
 
 const COLS = ['sheet', 'sheet_name', 'row_no', 'vin', 'case_number', 'customer_name', 'install_date', 'charger_model', 'car_model', 'serial', 'team', 'po_ref'];
@@ -21,6 +22,7 @@ export async function onRequestPost({ params, request, env }) {
     stmts.push(db.prepare(`INSERT INTO reference_rows (batch_id, ${COLS.join(', ')}) VALUES (?, ${COLS.map(() => '?').join(', ')})`)
       .bind(batchId, ...COLS.map((c) => (c === 'row_no' ? Number(r[c]) || 0 : String(r[c] ?? '')))));
   }
+  stmts.push(bump(db));
   await runBatched(db, stmts);
   return json({ saved: stmts.length - 2 });
 }

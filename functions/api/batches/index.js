@@ -1,6 +1,8 @@
 // GET  /api/batches  → all months with counts
 // POST /api/batches  → create or reopen (same folder) a month batch; returns processed file ids for resume
-import { OTHER_PROBLEMS_SQL, bad, folderIdFromUrl, json } from '../../../lib/server.js';
+import { bump } from '../../../lib/cache.js';
+import { loadAll } from '../../../lib/dataset.js';
+import { OTHER_PROBLEM_TYPES, bad, folderIdFromUrl, json } from '../../../lib/server.js';
 
 export async function onRequestGet({ request, env }) {
   // ?folder=<url or id> → that month's stored files, to compare with what is in Drive now.
@@ -15,31 +17,31 @@ export async function onRequestGet({ request, env }) {
     return json({ batch, files: results });
   }
 
-  const { results } = await env.DB.prepare(`
-    SELECT b.*,
-      (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id) AS record_count,
-      (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.vin_photo_match = 0) AS ocr_mismatch_count,
-      (SELECT COUNT(*) FROM issues i WHERE i.batch_id = b.id AND i.resolved = 0 AND i.${OTHER_PROBLEMS_SQL}) AS open_issue_count,
-      (SELECT COUNT(*) FROM reference_rows f WHERE f.batch_id = b.id AND f.sheet = 'install') AS reference_count,
-      (SELECT COUNT(*) FROM reference_rows f JOIN records r ON r.vin = f.vin
-         WHERE f.batch_id = b.id AND f.sheet = 'install') AS matched_count,
-      (SELECT COUNT(*) FROM batch_files x WHERE x.batch_id = b.id AND x.status != 'replaced') AS processed_count,
-      (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.file_status = 'deleted') AS deleted_count,
-      (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.file_status = 'updated') AS updated_count
-    FROM batches b ORDER BY b.month DESC, b.id DESC`).all();
-  // Excel-side problems, counted in SQL only (this endpoint runs on every page — keep it cheap):
-  // Excel rows with an invalid VIN + PDFs whose VIN is only in another month's Excel.
-  const { results: xp } = await env.DB.prepare(`
-    SELECT batch_id, COUNT(*) AS n FROM (
-      SELECT f.batch_id FROM reference_rows f WHERE f.sheet = 'install_invalid'
-      UNION ALL
-      SELECT r.batch_id FROM records r
-      WHERE NOT EXISTS (SELECT 1 FROM reference_rows g WHERE g.vin = r.vin AND g.batch_id = r.batch_id AND g.sheet = 'install')
-        AND EXISTS (SELECT 1 FROM reference_rows g WHERE g.vin = r.vin AND g.batch_id != r.batch_id AND g.sheet = 'install')
-    ) GROUP BY batch_id`).all();
-  const xpBy = new Map(xp.map((x) => [x.batch_id, x.n]));
-  for (const b of results) b.excel_problem_count = xpBy.get(b.id) || 0;
-  return json({ batches: results, excel_problems: xp.reduce((a, x) => a + x.n, 0) });
+  // Everything computed from the cached dataset (one D1 row read per call while nothing changed).
+  const data = await loadAll(env.DB);
+  const installKey = new Set(data.refs.filter((f) => f.sheet === 'install').map((f) => `${f.batch_id}|${f.vin}`));
+  const installVins = new Set(data.refs.filter((f) => f.sheet === 'install').map((f) => f.vin));
+  const recVins = new Set(data.records.map((r) => r.vin));
+  const results = [...data.batches].sort((x, y) => y.month.localeCompare(x.month) || y.id - x.id).map((b) => {
+    const recs = data.records.filter((r) => r.batch_id === b.id);
+    const refs = data.refs.filter((f) => f.batch_id === b.id);
+    const files = data.files.filter((f) => f.batch_id === b.id && f.status !== 'replaced');
+    const excelProblems = refs.filter((f) => f.sheet === 'install_invalid').length
+      + recs.filter((r) => !installKey.has(`${b.id}|${r.vin}`) && installVins.has(r.vin)).length;
+    return {
+      ...b,
+      record_count: recs.length,
+      ocr_mismatch_count: recs.filter((r) => r.vin_photo_match === 0).length,
+      open_issue_count: data.issues.filter((i) => i.batch_id === b.id && !i.resolved && OTHER_PROBLEM_TYPES.includes(i.type)).length,
+      reference_count: refs.filter((f) => f.sheet === 'install').length,
+      matched_count: refs.filter((f) => f.sheet === 'install' && recVins.has(f.vin)).length,
+      processed_count: files.length,
+      deleted_count: recs.filter((r) => r.file_status === 'deleted').length,
+      updated_count: recs.filter((r) => r.file_status === 'updated').length,
+      excel_problem_count: excelProblems,
+    };
+  });
+  return json({ batches: results, excel_problems: results.reduce((a2, x) => a2 + x.excel_problem_count, 0) });
 }
 
 export async function onRequestPost({ request, env }) {
@@ -60,6 +62,7 @@ export async function onRequestPost({ request, env }) {
       String(body.referenceName || ''), Number(body.pdfCount) || 0)
     .run();
 
+  await bump(env.DB).run();
   const batch = await env.DB.prepare('SELECT * FROM batches WHERE folder_id = ?').bind(folderId).first();
   const { results } = await env.DB.prepare('SELECT file_id FROM batch_files WHERE batch_id = ?').bind(batch.id).all();
   // Files worth another try: failed files, and saved records whose VIN photo reading errored

@@ -1,6 +1,7 @@
 // POST /api/batches/:id/file-status { deleted: [fileIds], restored: [fileIds] }
 // Marks records whose PDF was removed from the Drive folder as "deleted" (the data is kept), and
 // clears that mark when the PDF is back.
+import { bump } from '../../../../lib/cache.js';
 import { bad, json, runBatched } from '../../../../lib/server.js';
 
 export async function onRequestPost({ params, request, env }) {
@@ -22,6 +23,7 @@ export async function onRequestPost({ params, request, env }) {
     stmts.push(env.DB.prepare(`UPDATE records SET file_status = '', file_status_at = datetime('now')
       WHERE pdf_file_id = ? AND batch_id = ? AND file_status = 'deleted'`).bind(id, batchId));
   }
+  stmts.push(bump(env.DB));
   await runBatched(env.DB, stmts);
   return json({ deleted: deleted.length, restored: restored.length });
 }

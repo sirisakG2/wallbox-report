@@ -1,11 +1,15 @@
 // PATCH /api/issues/:id  { resolved: 0|1 }
 // POST  /api/issues/:id  { action: "replace" } — for duplicate_vin: replace the stored record with this PDF's data
+import { bump } from '../../../lib/cache.js';
 import { upsertRecord } from '../../../lib/db.js';
 import { bad, json } from '../../../lib/server.js';
 
 export async function onRequestPatch({ params, request, env }) {
   const body = await request.json().catch(() => ({}));
-  await env.DB.prepare('UPDATE issues SET resolved = ? WHERE id = ?').bind(body.resolved ? 1 : 0, Number(params.id)).run();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE issues SET resolved = ? WHERE id = ?').bind(body.resolved ? 1 : 0, Number(params.id)),
+    bump(env.DB),
+  ]);
   return json({ ok: true });
 }
 
@@ -26,6 +30,7 @@ export async function onRequestPost({ params, request, env }) {
     // The replaced PDF becomes the duplicate now.
     env.DB.prepare(`UPDATE batch_files SET status = 'duplicate' WHERE batch_id = ? AND file_id = ?`)
       .bind(prev.batch_id ?? -1, prev.pdf_file_id ?? ''),
+    bump(env.DB),
   ]);
   return json({ ok: true });
 }

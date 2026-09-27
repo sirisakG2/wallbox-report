@@ -28,6 +28,7 @@ Live: https://wallbox.anotai.net (also wallbox-report.pages.dev) · Repo: sirisa
 | `b2914d0` | Other problems made simple: one card per problem type (English + Thai name, what it means, what to do, open count; click to filter), plain-language table (What happened / What to do). "Export detailed Excel": Read me sheet explaining every problem in English and Thai (meaning, why it matters, what to do, open/resolved), All problems sheet, and one sheet per problem type with its specific columns (e.g. header job vs table job, both PDFs of a duplicate VIN). |
 | `0452511` | Other problems split by source and highlighted: "① From Check PDF" (edited PDF, duplicate VIN, scanned page, charger photo, not read yet, updated in Drive) and "② From Check Excel" — new Excel-side problems: VIN missing in Excel (text such as "ติดตั้งก่อนรับรถ", suggested PDF by customer name), VIN typo in Excel (suggested closest PDF VIN), PDF in another month's Excel. Excel rows with an invalid VIN are now kept (sheet install_invalid). Detailed export gains a Source column and a "② Excel problems" sheet. Menu: Export removed; order Dashboard · ① · ② · Other problems · Months … Import month · All PDFs (right). |
 | `1e5dd54` | "Months" and "Import month" merged into one "Months & Import" page (import form on top, imported months below; list refreshes after an import), placed at the right of the menu next to All PDFs. When a folder has several Excel files, the one the month was imported with is kept (shown with a note) instead of silently switching to the first file. Also: 503 fix — Excel-problem counts in /api/batches are one SQL query; Excel-problem suggestions use cheap lookups. |
+| next | D1 free daily read limit (5M rows) was exceeded — the check pages ran ~16 sub-queries per record on every view. Now every read endpoint uses one shared loader (records, Excel rows, issues, batch files, months — ~5k rows) scored in memory and cached per data version (meta table; every write bumps it), so repeat page views cost 1 row read. |
 
 ## Data — June 2026 (503 PDFs)
 - First import: 485 records saved; stopped reading photos when the free Workers AI allowance (10,000 neurons/day) ran out.
@@ -42,5 +43,6 @@ Live: https://wallbox.anotai.net (also wallbox-report.pages.dev) · Repo: sirisa
 - Decide: PDF install date is often 1–15 days later than the submission Excel — allow a tolerance in Compare or keep strict?
 
 ## Notes
+- Cloudflare free plan limits: D1 5M row reads/day, Workers CPU ~10 ms/request, Workers AI 10k neurons/day (all reset 00:00 UTC = 07:00 Thailand). Workers Paid ($5/month) lifts them.
 - Password: keep current (do not change).
 - Wrangler for this project uses its own login: `XDG_CONFIG_HOME=$HOME/.wrangler-anotai`.

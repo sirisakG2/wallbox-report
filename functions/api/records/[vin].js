@@ -8,6 +8,7 @@
 //   { confirm_name: true }           the customer name is right as read   (→ 100 %)
 // Every change is written to record_history (old → new value, time, IP); related issues are resolved.
 // GET /api/records/:vin → { record, history }
+import { bump } from '../../../lib/cache.js';
 import { VIN_RE, bad, json, normalizeVin } from '../../../lib/server.js';
 
 const noteSql = `notes = CASE WHEN notes = '' THEN ?1 ELSE notes || '; ' || ?1 END`;
@@ -94,6 +95,7 @@ export async function onRequestPatch({ params, request, env }) {
   }
 
   if (!stmts.length) return bad('Nothing to update');
+  stmts.push(bump(db));
   await db.batch(stmts);
   return json({ ok: true, vin: finalVin });
 }

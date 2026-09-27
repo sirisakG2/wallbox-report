@@ -121,3 +121,7 @@ CREATE TABLE IF NOT EXISTS record_history (
   at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_history_vin ON record_history(vin, at);
+
+-- Data version: bumped by every write so read endpoints can reuse cached results (saves D1 row reads).
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0);
+INSERT OR IGNORE INTO meta (key, value) VALUES ('version', 1);

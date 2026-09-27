@@ -5,6 +5,7 @@
 // the original is kept and a duplicate_vin issue is logged (can be replaced from the Issues tab).
 // Re-reading a file never undoes admin review: a confirmed/corrected VIN or date, admin notes and
 // resolved issues are carried over to the new reading (also to a re-uploaded copy that replaces it).
+import { bump } from '../../../../lib/cache.js';
 import { upsertRecord } from '../../../../lib/db.js';
 import { bad, json, runBatched } from '../../../../lib/server.js';
 
@@ -119,6 +120,7 @@ export async function onRequestPost({ params, request, env }) {
       .bind(batchId, file.id, file.name, status, String(file.modified || ''), Number(file.size) || 0));
   }
 
+  stmts.push(bump(db));
   await runBatched(db, stmts);
   return json({ saved, duplicates, errors });
 }
