@@ -376,3 +376,13 @@ td.warn-cell { background: var(--warn-soft); color: var(--warn); }
 .ok-mark { color: var(--ok); font-weight: 700; } .bad-mark { color: var(--bad); font-weight: 700; } .warn-mark { color: var(--warn); font-weight: 700; }
 .review-grid { grid-template-columns: 1fr 1fr; }
 .review-grid .review-box:nth-child(3) { grid-column: 1 / -1; }
+
+/* Month highlight + history */
+.month-line { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.month-badge { background: var(--accent); color: var(--accent-ink); font-weight: 750; letter-spacing: 0.08em; font-size: 13px; padding: 4px 12px; border-radius: 8px; box-shadow: 0 0 18px var(--accent-soft); }
+.history { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin: 4px 0 12px; background: var(--surface-2); }
+.history-list { margin: 8px 0 0; padding: 0; list-style: none; font-size: 12.5px; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
+.history-list li { display: grid; grid-template-columns: 118px 1fr; gap: 8px; }
+.h-time { color: var(--text-3); }
+.h-old { text-decoration: line-through; color: var(--text-3); }
+.h-new { color: var(--ok); font-weight: 600; }

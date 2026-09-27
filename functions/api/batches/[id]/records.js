@@ -26,7 +26,7 @@ export async function onRequestPost({ params, request, env }) {
 
   // Records these files produced before, and what an admin already decided for them.
   const { results: reviewed } = await db.prepare(
-    `SELECT vin, file_vin, pdf_file_id, vin_confirmed, date_confirmed, install_date, notes FROM records
+    `SELECT vin, file_vin, pdf_file_id, vin_confirmed, date_confirmed, name_confirmed, install_date, customer_name, notes FROM records
      WHERE pdf_file_id IN (${inAll})`)
     .bind(...allIds).all();
   const byFile = new Map(reviewed.map((r) => [r.pdf_file_id, r]));
@@ -48,6 +48,7 @@ export async function onRequestPost({ params, request, env }) {
       for (const is of item.issues || []) is.vin = prev.vin;
     }
     if (prev.date_confirmed) r.install_date = prev.install_date;
+    if (prev.name_confirmed) r.customer_name = prev.customer_name;
     const adminNotes = String(prev.notes || '').split('; ').filter((n) => n.includes('by admin'));
     if (adminNotes.length) r.notes = [r.notes, ...adminNotes].filter(Boolean).join('; ');
   }
@@ -82,6 +83,8 @@ export async function onRequestPost({ params, request, env }) {
         stmts.push(upsertRecord(db, batchId, record));
         if (item.update) {
           stmts.push(db.prepare(`UPDATE records SET file_status = 'updated', file_status_at = datetime('now') WHERE vin = ?`).bind(record.vin));
+          stmts.push(db.prepare(`INSERT INTO record_history (vin, batch_id, field, action, old_value, new_value, note) VALUES (?, ?, 'file', 'updated', ?, ?, ?)`)
+            .bind(record.vin, batchId, item.replaces || file.id, file.id, item.replaces ? 'PDF re-uploaded in Drive — read again' : 'PDF changed in Drive — read again'));
         }
         if (item.replaces) {
           stmts.push(db.prepare(`UPDATE batch_files SET status = 'replaced' WHERE batch_id = ? AND file_id = ?`).bind(batchId, item.replaces));

@@ -15,6 +15,7 @@ const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const fmtMonth = (ym, long = false) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); return m ? `${(long ? MONTHS_LONG : MONTHS_EN)[+m[2] - 1]} ${m[1]}` : ym || ''; };
 const pdfUrl = (id) => `https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
+const excelUrl = (id) => (id ? `https://drive.google.com/file/d/${encodeURIComponent(id)}/view` : '');
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 
 const ICON = {
@@ -517,11 +518,17 @@ function openRecord(r) {
         <div class="review-box">
           <div class="review-head"><span>Excel check</span>${excelPill(r.excel_status, r.excel_conf)}</div>
           <table class="vin-sources">
-            <tr><td>VIN</td><td class="mono">${esc(r.vin)}</td><td>${r.excel_status === 'missing' ? '<span class="bad-mark">not in Excel</span>' : '<span class="ok-mark">✔ col H</span>'}</td></tr>
+            <tr><td>VIN</td><td class="mono">${esc(r.vin)}</td><td>${r.excel_status === 'missing' ? '<span class="bad-mark">not in Excel</span>' : `<span class="ok-mark">✔ row ${esc(r.ref_row || '?')}</span>`}</td></tr>
             <tr><td>PDF name</td><td colspan="2">${esc(r.customer_name) || '–'}</td></tr>
             <tr><td>Excel name</td><td colspan="2">${esc(r.ref_name) || '<span class="faint">–</span>'}</td></tr>
           </table>
+          ${r.ref_sheet_name ? `<div class="faint" style="font-size:12px">Sheet “${esc(r.ref_sheet_name)}” · row ${esc(r.ref_row)} · column H (VIN) / D (name)</div>` : ''}
           ${reasons(r.excel_reasons.slice(3).concat(r.excel_status === 'missing' ? r.excel_reasons : []))}
+          <div class="row-actions">
+            ${excelUrl(r.ref_file_id || r.month_ref_file_id) ? `<a class="btn sm" href="${excelUrl(r.ref_file_id || r.month_ref_file_id)}" target="_blank" rel="noopener">Open Excel ${ICON.ext}</a>` : ''}
+            ${r.name_confirmed ? '' : `<button class="btn sm" data-confirm-name="${esc(r.vin)}">✔ Name is correct</button>`}
+            <button class="btn sm" data-edit-name="${esc(r.vin)}">Edit name</button>
+          </div>
         </div>
         <div class="review-box">
           <div class="review-head"><span>Installation date</span>${confPill(r.date_conf, true)}</div>
@@ -558,15 +565,46 @@ function openRecord(r) {
   const d = document.createElement('aside');
   d.className = 'drawer';
   d.innerHTML = `
-    <div class="drawer-head"><div><div class="label-sm">Installation record</div><h2>${esc(r.customer_name || r.vin)}</h2></div>
+    <div class="drawer-head"><div>
+        <div class="month-line"><span class="month-badge">${esc(fmtMonth(r.month, true).toUpperCase())}</span>
+          ${r.ref_month && r.ref_month !== r.month ? `<span class="pill warn">In the ${esc(fmtMonth(r.ref_month, true))} Excel</span>` : ''}
+          <span class="label-sm">Installation record</span></div>
+        <h2>${esc(r.customer_name || r.vin)}</h2>
+        <div class="faint" style="font-size:12.5px;margin-top:3px">VIN <span class="mono">${esc(r.vin)}</span></div></div>
       <button class="icon-btn" aria-label="Close">✕</button></div>
-    <div class="drawer-body">${review}<dl style="margin:0">${rows.map(([k, v]) => `<div class="kv"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl></div>`;
+    <div class="drawer-body">${review}
+      <div class="history" id="recHistory"><div class="label-sm">History</div><div class="faint" style="font-size:12.5px">Loading…</div></div>
+      <dl style="margin:0">${rows.map(([k, v]) => `<div class="kv"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl></div>`;
   const close = () => { back.remove(); d.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   back.onclick = close;
   $('.icon-btn', d).onclick = close;
   document.addEventListener('keydown', onKey);
   document.body.append(back, d);
+  editContext.set(r.vin, r);
+  loadHistory(r.vin, $('#recHistory', d));
+}
+
+// ---------- record transaction history ----------
+const FIELD_LABEL = { vin: 'VIN', install_date: 'Installation date', customer_name: 'Customer name', file: 'PDF file' };
+const ACTION_LABEL = { confirm: 'Confirmed', correct: 'Corrected', updated: 'Updated in Drive', deleted: 'Deleted from Drive', restored: 'Back in Drive' };
+// Stored times are UTC ("YYYY-MM-DD HH:MM:SS") → local "dd/mm/yyyy HH:MM".
+function localTime(at) {
+  const d = new Date(`${String(at).replace(' ', 'T')}Z`);
+  if (Number.isNaN(d.getTime())) return at;
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+async function loadHistory(vin, box) {
+  try {
+    const { history } = await api(`/api/records/${encodeURIComponent(vin)}`);
+    box.innerHTML = `<div class="label-sm">History</div>${history.length ? `<ol class="history-list">${history.map((h) => `
+      <li><span class="h-time num">${esc(localTime(h.at))}</span>
+        <span><b>${esc(ACTION_LABEL[h.action] || h.action)}</b> ${esc(FIELD_LABEL[h.field] || h.field)}
+        ${h.field !== 'file' && h.old_value !== h.new_value ? `: <span class="h-old">${esc(h.field === 'install_date' ? fmtDate(h.old_value) || h.old_value || '–' : h.old_value || '–')}</span> → <span class="h-new">${esc(h.field === 'install_date' ? fmtDate(h.new_value) : h.new_value)}</span>` : h.field !== 'file' ? `: ${esc(h.field === 'install_date' ? fmtDate(h.new_value) : h.new_value)}` : ''}
+        ${h.note ? `<span class="faint"> · ${esc(h.note)}</span>` : ''}${h.ip ? `<span class="faint"> · ${esc(h.ip)}</span>` : ''}</span></li>`).join('')}</ol>`
+      : '<div class="faint" style="font-size:12.5px">No admin changes yet.</div>'}`;
+  } catch { box.innerHTML = '<div class="label-sm">History</div><div class="faint">Could not load history.</div>'; }
 }
 
 // ---------- Import summary (per month) ----------
@@ -771,7 +809,7 @@ async function renderMonths() {
               <td class="num">${fmtN(x.record_count)}</td>
               <td class="num" style="color:${x.ocr_mismatch_count ? 'var(--bad)' : 'inherit'}">${fmtN(x.ocr_mismatch_count)}</td>
               <td class="num">${fmtN(x.open_issue_count)}</td>
-              <td><div class="stack"><span class="num">${fmtN(x.matched_count)} / ${fmtN(x.reference_count)}</span><small title="${esc(x.reference_name)}">${esc((x.reference_name || 'no Excel').slice(0, 30))}</small></div></td>
+              <td><div class="stack"><span class="num">${fmtN(x.matched_count)} / ${fmtN(x.reference_count)}</span><small title="${esc(x.reference_name)}">${x.reference_file_id ? `<a href="${excelUrl(x.reference_file_id)}" target="_blank" rel="noopener">${esc((x.reference_name || 'Excel').slice(0, 30))} ${ICON.ext}</a>` : esc((x.reference_name || 'no Excel').slice(0, 30))}</small></div></td>
               <td><span class="pill ${STATUS_PILL[x.status] || 'neutral'}">${esc(x.status)}</span></td>
               <td class="faint num">${esc(fmtDate(x.imported_at))}</td>
               <td style="text-align:right;white-space:nowrap">
@@ -884,6 +922,44 @@ async function reviewPatch(vin, body, message) {
   } catch (err) { toast(err.message, 'err'); }
 }
 
+const editContext = new Map(); // vin → record shown in the drawer (for suggestions in dialogs)
+
+function editName(vin) {
+  const r = editContext.get(vin) || {};
+  const fromFile = (r.pdf_name || '').replace(/\.pdf$/i, '').replace(/^[A-Za-z0-9]{17}/, '').replace(/\(\d+\)$/, '').replace(/^[\s_\-.]+/, '').trim();
+  const back = document.createElement('div');
+  back.className = 'drawer-backdrop';
+  back.style.zIndex = 50;
+  const box = document.createElement('div');
+  box.className = 'card card-pad date-dialog';
+  box.style.width = '520px';
+  box.innerHTML = `
+    <h2 style="margin:0 0 4px;font-size:17px">Customer name</h2>
+    <p class="muted" style="margin:0 0 14px">Check the PDF and the Excel, then save the correct name. The change is kept in the history.</p>
+    <div class="field"><label>Customer name</label><input class="input lg" id="edName" value="${esc(r.customer_name || '')}" autocomplete="off"></div>
+    <div class="row-actions" style="margin-top:10px">
+      ${r.ref_name ? `<button class="btn sm" data-fill="${esc(r.ref_name)}" data-src="Excel">Use Excel name: ${esc(r.ref_name)}</button>` : ''}
+      ${fromFile && fromFile !== r.customer_name ? `<button class="btn sm" data-fill="${esc(fromFile)}" data-src="file name">Use file name: ${esc(fromFile)}</button>` : ''}
+    </div>
+    <div class="row-actions" style="margin-top:18px;justify-content:flex-end">
+      <button class="btn" id="edCancel">Cancel</button><button class="btn primary" id="edSave">Save</button></div>`;
+  const close = () => { back.remove(); box.remove(); };
+  back.onclick = close;
+  document.body.append(back, box);
+  let source = '';
+  const inp = $('#edName', box);
+  $$('[data-fill]', box).forEach((b) => { b.onclick = () => { inp.value = b.dataset.fill; source = b.dataset.src; inp.focus(); }; });
+  inp.oninput = () => { source = ''; };
+  inp.focus();
+  $('#edCancel', box).onclick = close;
+  $('#edSave', box).onclick = async () => {
+    const name = inp.value.trim();
+    if (name.length < 2) { toast('Enter the customer name', 'err'); return; }
+    close();
+    await reviewPatch(vin, { customer_name: name, source }, 'Customer name saved');
+  };
+}
+
 function correctVin(vin) {
   const back = document.createElement('div');
   back.className = 'drawer-backdrop';
@@ -916,6 +992,10 @@ function correctVin(vin) {
 document.addEventListener('click', (e) => {
   const g = e.target.closest('[data-go]');
   if (g) { e.preventDefault(); go(g.dataset.go, g.dataset.batch ? { batch: g.dataset.batch } : {}); return; }
+  const cn = e.target.closest('[data-confirm-name]');
+  if (cn) { e.preventDefault(); reviewPatch(cn.dataset.confirmName, { confirm_name: true }, 'Customer name confirmed'); return; }
+  const en = e.target.closest('[data-edit-name]');
+  if (en) { e.preventDefault(); editName(en.dataset.editName); return; }
   const cv = e.target.closest('[data-confirm-vin]');
   if (cv) { e.preventDefault(); reviewPatch(cv.dataset.confirmVin, { confirm_vin: true }, 'VIN confirmed'); return; }
   const cd = e.target.closest('[data-confirm-date]');

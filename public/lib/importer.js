@@ -342,7 +342,7 @@ export async function runImport({ folder, month, plan = null, reprocess = false,
       ui.log(`Reading reference Excel "${refFile.name}"…`);
       const buf = await withRetry(() => download(refFile.id, signal));
       const { rows, sheets } = await parseReference(window.ExcelJS, buf);
-      await api(`/api/batches/${batch.id}/reference`, { method: 'POST', body: { name: refFile.name, rows } });
+      await api(`/api/batches/${batch.id}/reference`, { method: 'POST', body: { name: refFile.name, fileId: refFile.id, rows } });
       ui.log(`Reference saved: ${sheets.map((s) => `${s.name} (${s.rows})`).join(', ')}`, 'ok');
     } catch (e) {
       if (e.name === 'AbortError') throw e;

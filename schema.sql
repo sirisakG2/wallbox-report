@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS batches (
   folder_url    TEXT NOT NULL,
   folder_name   TEXT NOT NULL DEFAULT '',
   reference_name TEXT NOT NULL DEFAULT '',  -- submission xlsx found in the folder
+  reference_file_id TEXT NOT NULL DEFAULT '', -- its Google Drive file id (link for admins)
   pdf_count     INTEGER NOT NULL DEFAULT 0,
   status        TEXT NOT NULL DEFAULT 'running', -- running | done | partial
   imported_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS records (
   vin_read_by       TEXT NOT NULL DEFAULT '',  -- free (on-device text recognition) | ai (Workers AI) | ''
   vin_confirmed     INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked the PDF and confirmed/corrected the VIN
   date_confirmed    INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked the PDF and confirmed/corrected the date
+  name_confirmed    INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked and confirmed/corrected the customer name
   ocr_raw           TEXT NOT NULL DEFAULT '',
   notes             TEXT NOT NULL DEFAULT '',
   file_status       TEXT NOT NULL DEFAULT '',  -- '' | updated (PDF changed in Drive, re-read) | deleted (PDF gone from Drive)
@@ -55,6 +57,8 @@ CREATE TABLE IF NOT EXISTS reference_rows (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   batch_id      INTEGER NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
   sheet         TEXT NOT NULL,              -- install | charger_only
+  sheet_name    TEXT NOT NULL DEFAULT '',   -- worksheet tab name, e.g. "มิถุนายน 2026"
+  row_no        INTEGER NOT NULL DEFAULT 0, -- Excel row number
   vin           TEXT NOT NULL,
   case_number   TEXT NOT NULL DEFAULT '',
   customer_name TEXT NOT NULL DEFAULT '',
@@ -102,3 +106,18 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 CREATE INDEX IF NOT EXISTS idx_login_ip ON login_attempts(ip, at);
 
 CREATE INDEX IF NOT EXISTS idx_issues_file ON issues(batch_id, pdf_file_id);
+
+-- Admin transaction history per record (confirmations and corrections).
+CREATE TABLE IF NOT EXISTS record_history (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  vin       TEXT NOT NULL,
+  batch_id  INTEGER NOT NULL DEFAULT 0,
+  field     TEXT NOT NULL,              -- vin | install_date | customer_name
+  action    TEXT NOT NULL,              -- confirm | correct
+  old_value TEXT NOT NULL DEFAULT '',
+  new_value TEXT NOT NULL DEFAULT '',
+  note      TEXT NOT NULL DEFAULT '',
+  ip        TEXT NOT NULL DEFAULT '',
+  at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_history_vin ON record_history(vin, at);

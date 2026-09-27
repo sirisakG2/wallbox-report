@@ -60,6 +60,8 @@ function readSheet(ws, sheetType) {
     if (!VIN_RE.test(vin)) continue;
     rows.push({
       sheet: sheetType,
+      sheet_name: ws.name,
+      row_no: r,
       vin,
       case_number: cellText(get('case_number')).trim(),
       customer_name: cleanThai(cellText(get('customer_name')).trim()),
