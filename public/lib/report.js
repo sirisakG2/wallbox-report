@@ -33,11 +33,13 @@ function addSheet(wb, name, columns, rows, style) {
   return ws;
 }
 
-export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
+// kind: 'check1' (Check 1 sheet) · 'check2' (Check 2 sheet) · 'all' (PDF, Check 1, Check 2, Other problems)
+export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'all' }) {
   const q = batchId ? `batch=${batchId}&` : '';
+  const want = { pdf: kind === 'all', check1: kind === 'all' || kind === 'check1', check2: kind === 'all' || kind === 'check2', problems: kind === 'all' };
   const [{ records }, { issues }, { batches }] = await Promise.all([
     api(`/api/records?${q}size=all`),
-    api(`/api/issues?${q}`),
+    want.problems ? api(`/api/issues?${q}scope=other`) : { issues: [] },
     api('/api/batches'),
   ]);
 
@@ -46,13 +48,13 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
   wb.created = new Date();
   const dateCol = { numFmt: 'dd/mm/yyyy' };
 
-  addSheet(wb, 'Records', [
+  if (want.pdf) addSheet(wb, 'PDF', [
     { header: 'VIN (file name, key)', key: 'vin', width: 21 },
-    { header: 'VIN check', key: 'vin_level_label', width: 15 },
+    { header: '① Check PDF', key: 'vin_level_label', width: 16 },
+    { header: '② Check Excel %', key: 'xl_pct', width: 11 },
     { header: 'Photo VIN', key: 'vin_picture', width: 21 },
     { header: 'Paper VIN', key: 'paper_vin', width: 21 },
-    { header: 'Excel check', key: 'excel_text', width: 14 },
-    { header: 'Name match %', key: 'excel_pct', width: 10 },
+    { header: 'Excel row', key: 'ref_row_text', width: 16 },
     { header: 'Excel name (col D)', key: 'ref_name', width: 30 },
     { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
     { header: 'Date %', key: 'date_conf_pct', width: 8 },
@@ -77,10 +79,10 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     { header: 'Notes', key: 'notes', width: 40 },
   ], records.map((r) => ({
     vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
-    excel_text: r.excel_label,
-    excel_pct: r.excel_status === 'missing' ? '' : r.excel_conf / 100,
+    xl_pct: r.xl_band === 'noexcel' ? 'Not in Excel' : r.xl_score / 100,
+    ref_row_text: r.ref_row ? `${r.ref_sheet_name || ''} · ${r.ref_row}` : '',
     date_conf_pct: r.date_conf / 100,
-    needs_review: r.vin_level === 3 || r.excel_conf < 80 || r.date_conf < 95 ? 'Yes' : '',
+    needs_review: r.vin_level === 3 || r.xl_band === 'low' || r.xl_band === 'noexcel' || r.date_conf < 95 ? 'Yes' : '',
     vin_why: r.vin_conf_reasons.join('; '),
     file_status_text: r.file_status ? `${r.file_status === 'updated' ? 'Updated' : 'Deleted'} ${String(r.file_status_at).slice(0, 10)}` : '',
     date_why: r.date_conf_reasons.join('; '),
@@ -90,16 +92,16 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     job_url: urlLink(r.job_url),
     pdf_link: driveLink(r.pdf_file_id),
   })), (row, r) => {
-    const xl = row.getCell('excel_text');
-    xl.fill = r.excel_status === 'match' ? GREEN_FILL : r.excel_status === 'close' ? AMBER_FILL : RED_FILL;
-    row.getCell('excel_pct').numFmt = '0%';
+    const xl = row.getCell('xl_pct');
+    xl.numFmt = '0%';
+    xl.fill = r.xl_band === 'full' || r.xl_band === 'high' ? GREEN_FILL : r.xl_band === 'medium' ? AMBER_FILL : RED_FILL;
     const dc = row.getCell('date_conf_pct');
     dc.numFmt = '0%';
     dc.fill = r.date_conf >= 95 ? GREEN_FILL : r.date_conf >= 80 ? AMBER_FILL : RED_FILL;
     row.getCell('vin_level_label').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
     if (r.vin_picture && r.vin_picture !== r.file_vin) row.getCell('vin_picture').fill = RED_FILL;
     if (r.paper_vin !== r.file_vin) row.getCell('paper_vin').fill = AMBER_FILL;
-    if (r.vin_level === 3 || r.excel_conf < 80 || r.date_conf < 95) row.getCell('needs_review').fill = AMBER_FILL;
+    if (r.vin_level === 3 || r.xl_band === 'low' || r.xl_band === 'noexcel' || r.date_conf < 95) row.getCell('needs_review').fill = AMBER_FILL;
     if (r.file_status === 'deleted') row.getCell('file_status_text').fill = RED_FILL;
     if (r.file_status === 'updated') row.getCell('file_status_text').fill = AMBER_FILL;
     const c = row.getCell('match');
@@ -114,7 +116,33 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     ['serial_match', 'rec_serial', 'ref_serial'],
     ['name_match', 'rec_name', 'ref_name'],
   ];
-  const base = await api(`/api/baseline?${batchId ? `batch=${batchId}&` : ''}size=all`);
+  if (want.check1) {
+    const LEVEL = { 1: '① Match 3/3', 2: '② File = Photo', 3: '③ Not matched' };
+    addSheet(wb, 'Check 1 · PDF', [
+      { header: 'Month', key: 'month', width: 9 },
+      { header: 'VIN in file name (reference)', key: 'file_vin', width: 22 },
+      { header: 'VIN in photo', key: 'vin_picture', width: 22 },
+      { header: 'VIN in paper box', key: 'paper_vin', width: 22 },
+      { header: 'Result', key: 'level', width: 16 },
+      { header: 'Photo read by', key: 'read_by', width: 12 },
+      { header: 'Why', key: 'why', width: 60 },
+      { header: 'Customer (PDF)', key: 'customer_name', width: 30 },
+      { header: 'Job number', key: 'job_number', width: 15 },
+      { header: 'PDF file', key: 'pdf_name', width: 40 },
+      { header: 'PDF link', key: 'pdf_link', width: 10 },
+    ], records.map((r) => ({
+      month: r.month, file_vin: r.file_vin || '', vin_picture: r.vin_picture || (r.charger_photo ? 'charger photo' : 'not read'),
+      paper_vin: r.paper_vin || '', level: LEVEL[r.vin_level], read_by: r.vin_read_by === 'free' ? 'Free reader' : r.vin_read_by === 'ai' ? 'AI' : '',
+      why: r.vin_conf_reasons.join('; '), customer_name: r.customer_name, job_number: r.job_number, pdf_name: r.pdf_name, pdf_link: driveLink(r.pdf_file_id),
+    })), (row, r) => {
+      row.getCell('level').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
+      if (r.vin_picture && r.vin_picture !== r.file_vin) row.getCell('vin_picture').fill = RED_FILL;
+      if (r.paper_vin !== r.file_vin) row.getCell('paper_vin').fill = AMBER_FILL;
+    });
+  }
+
+  const base = want.check2 ? await api(`/api/baseline?${batchId ? `batch=${batchId}&` : ''}size=all`) : null;
+  if (want.check2) {
   const mark = (ok) => (ok ? '✔' : '✘');
   addSheet(wb, 'Check 2 · Excel baseline', [
     { header: 'Month', key: 'month', width: 9 },
@@ -156,7 +184,9 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     if (x.parts && x.parts.date_days !== 0) row.getCell('date').fill = AMBER_FILL;
   });
 
-  addSheet(wb, 'Issues', [
+  }
+
+  if (want.problems) addSheet(wb, 'Other problems', [
     { header: 'Type', key: 'type', width: 16 },
     { header: 'VIN', key: 'vin', width: 21 },
     { header: 'Month', key: 'month', width: 9 },
@@ -179,24 +209,26 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
   sum.addRow([`Generated: ${new Date().toLocaleString('en-GB')}`]).font = FONT;
   sum.addRow([]);
   const lines = [
+    ['Export', { check1: '① Check PDF — file name ↔ inside PDF', check2: '② Check Excel — Excel rows as baseline', all: 'All sheets' }[kind]],
     ['Months included', scope.map((b) => b.month).join(', ')],
     ['PDFs in folder(s)', scope.reduce((a, b) => a + b.pdf_count, 0)],
-    ['Records (unique VIN)', records.length],
-    ['VIN ① Match 3/3 (file = photo = paper)', records.filter((r) => r.vin_level === 1).length],
-    ['VIN ② File = Photo (paper differs)', records.filter((r) => r.vin_level === 2).length],
-    ['VIN ③ Not matched (photo ≠ file name)', records.filter((r) => r.vin_level === 3).length],
+    ['PDF records (unique VIN)', records.length],
+  ];
+  if (want.check1) lines.push(
+    ['① Match 3/3 (file = photo = paper)', records.filter((r) => r.vin_level === 1).length],
+    ['② File = Photo (paper box differs)', records.filter((r) => r.vin_level === 2).length],
+    ['③ Not matched (photo ≠ file name)', records.filter((r) => r.vin_level === 3).length],
+  );
+  if (want.check2) lines.push(
     ['Check 2 · Excel rows', base.rows.length],
     ['Check 2 · 100% match', base.facets.full],
     ['Check 2 · 90–99%', base.facets.high],
     ['Check 2 · 70–89%', base.facets.medium],
     ['Check 2 · below 70%', base.facets.low],
     ['Check 2 · Excel row with no PDF', base.facets.nopdf],
-    ['Check 2 · PDF not in Excel', base.pdfOnly ? base.pdfOnly.length : base.facets.pdfonly],
-    ['VIN photo ✔ match', records.filter((r) => r.vin_photo_match === 1).length],
-    ['VIN photo ✘ mismatch', records.filter((r) => r.vin_photo_match === 0).length],
-    ['VIN photo not read', records.filter((r) => r.vin_photo_match == null).length],
-    ['Open issues', issues.filter((i) => !i.resolved).length],
-  ];
+    ['Check 2 · PDF not in Excel', base.facets.pdfonly],
+  );
+  if (want.problems) lines.push(['Other problems (open)', issues.filter((i) => !i.resolved).length]);
   for (const l of lines) {
     const row = sum.addRow(l);
     row.font = FONT;
@@ -211,7 +243,7 @@ export async function downloadWorkbook(ExcelJS, opts) {
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `wallbox_${opts.fileTag}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.download = `wallbox_${opts.kind || 'all'}_${opts.fileTag}_${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();

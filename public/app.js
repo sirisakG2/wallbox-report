@@ -475,7 +475,7 @@ async function renderCheckPdf(params) {
   view.innerHTML = `
     <div class="view-head"><div><h1><span class="tab-num big">1</span> Check PDF</h1>
       <p>Is the VIN in the <b>file name</b> the same as the VIN <b>inside the PDF</b>? The file name is the reference; the VIN photo must confirm it; the paper VIN box is checked too.</p></div>
-      <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Export Excel</button></div>
+      <button class="btn" data-export="${esc(params.get('batch') || '')}" data-kind="check1">${ICON.download} Export Check 1</button></div>
     <div class="card">
       <div class="toolbar">
         <div class="field"><label>Month</label><select class="select" id="ckBatch">${monthOptions(params.get('batch'))}</select></div>
@@ -556,7 +556,7 @@ async function renderCheckExcel(params) {
       <p>Each <b>Excel row</b> (row, VIN, customer, case number, install date) is the baseline. The app finds the PDF with the same VIN and checks every field. <b>% match</b> = VIN in file name 15 + photo 15 + paper 10 + name 25 + case number 15 + date 20.</p></div>
       <div class="row-actions">
         ${monthExcel?.reference_file_id ? `<a class="btn" href="${excelUrl(monthExcel.reference_file_id)}" target="_blank" rel="noopener">Open ${esc(fmtMonth(monthExcel.month))} Excel ${ICON.ext}</a>` : ''}
-        <button class="btn" data-export="${esc(batch)}">${ICON.download} Export Excel</button></div></div>
+        <button class="btn" data-export="${esc(batch)}" data-kind="check2">${ICON.download} Export Check 2</button></div></div>
     <div class="card">
       <div class="toolbar">
         <div class="field"><label>Month (Excel)</label><select class="select" id="ckBatch">${monthOptions(batch)}</select></div>
@@ -588,7 +588,7 @@ async function renderRecords(params) {
 
   view.innerHTML = `
     <div class="view-head"><div><h1>All PDFs</h1><p>Every PDF record with both check results — search anything, filter, and use “Needs review” as the work queue. Click a row to check and confirm.</p></div>
-      <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Export Excel</button></div>
+      <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Export all sheets</button></div>
     <div class="card">
       <form class="toolbar" id="filters">
         <div class="field"><label>Month</label><select class="select" name="batch">${monthOptions(params.get('batch'))}</select></div>
@@ -1005,26 +1005,29 @@ async function renderMonths() {
 // ---------- Export ----------
 function renderExport(params) {
   view.innerHTML = `
-    <div class="view-head"><div><h1>Export</h1><p>Download an Excel workbook built from the stored data.</p></div></div>
+    <div class="view-head"><div><h1>Export</h1><p>Download an Excel file built from the stored data.</p></div></div>
     <div class="grid cols-2">
       <div class="card card-pad">
         <div class="field" style="max-width:360px"><label>Months</label><select class="select" id="eBatch">${monthOptions(params.get('batch'))}</select></div>
+        <div class="field" style="max-width:360px;margin-top:16px"><label>What</label><select class="select" id="eKind">
+          <option value="all">All sheets</option><option value="check1">① Check PDF only</option><option value="check2">② Check Excel only</option></select></div>
         <div style="margin-top:22px"><button class="btn primary lg" id="eGo">${ICON.download} Download Excel</button></div>
       </div>
       <div class="card card-pad">
-        <h2 style="margin:0 0 12px;font-size:15px">Workbook contents</h2>
+        <h2 style="margin:0 0 12px;font-size:15px">Sheets</h2>
         <dl style="margin:0">
-          <div class="kv"><dt>Records</dt><dd>One row per PDF: VIN, VIN picture, VIN photo match, installation date, job, customer, serial, links</dd></div>
-          <div class="kv"><dt>Compare vs Reference</dt><dd>PDF vs submission Excel — date, job/case number, serial, name; mismatches in red</dd></div>
-          <div class="kv"><dt>Issues</dt><dd>Duplicates, VIN photo mismatches, scanned pages, errors</dd></div>
-          <div class="kv" style="border:0"><dt>Summary</dt><dd>Counts per export</dd></div>
+          <div class="kv"><dt>PDF</dt><dd>One row per PDF: all fields, ① result, ② % match, date %, links (All sheets)</dd></div>
+          <div class="kv"><dt>Check 1 · PDF</dt><dd>VIN in file name vs photo vs paper box, result ①②③ and why</dd></div>
+          <div class="kv"><dt>Check 2 · Excel baseline</dt><dd>Every Excel row with ✔/✘ per field and % match</dd></div>
+          <div class="kv"><dt>Other problems</dt><dd>Edited PDF, duplicate VIN, scanned page, charger photo, failed files (All sheets)</dd></div>
+          <div class="kv" style="border:0"><dt>Summary</dt><dd>Counts for the export</dd></div>
         </dl>
       </div>
     </div>`;
-  $('#eGo').onclick = () => exportExcel($('#eBatch').value);
+  $('#eGo').onclick = () => exportExcel($('#eBatch').value, $('#eKind').value);
 }
 
-async function exportExcel(batchId) {
+async function exportExcel(batchId, kind = 'all') {
   if (!window.ExcelJS) { toast('Excel library is still loading, try again', 'err'); return; }
   const b = state.batches.find((x) => String(x.id) === String(batchId));
   toast('Building Excel…');
@@ -1033,6 +1036,7 @@ async function exportExcel(batchId) {
       batchId: b ? b.id : null,
       label: b ? fmtMonth(b.month, true) : 'All months',
       fileTag: b ? b.month : 'all-months',
+      kind,
     });
   } catch (e) {
     toast(`Export failed: ${e.message}`, 'err');
@@ -1168,7 +1172,7 @@ document.addEventListener('click', (e) => {
   const sm = e.target.closest('[data-summary]');
   if (sm) { e.preventDefault(); openSummary(sm.dataset.summary).catch((err) => toast(err.message, 'err')); return; }
   const x = e.target.closest('[data-export]');
-  if (x) { e.preventDefault(); exportExcel(x.dataset.export); }
+  if (x) { e.preventDefault(); exportExcel(x.dataset.export, x.dataset.kind || 'all'); }
 });
 $$('.tab').forEach((t) => { t.onclick = () => go(t.dataset.view); });
 
