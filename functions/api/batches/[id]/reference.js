@@ -17,7 +17,7 @@ export async function onRequestPost({ params, request, env }) {
       .bind(String(body.name || ''), String(body.fileId || ''), batchId),
   ];
   for (const r of body.rows) {
-    if (!r.vin || !['install', 'charger_only'].includes(r.sheet)) continue;
+    if (!r.vin || !['install', 'charger_only', 'install_invalid'].includes(r.sheet)) continue;
     stmts.push(db.prepare(`INSERT INTO reference_rows (batch_id, ${COLS.join(', ')}) VALUES (?, ${COLS.map(() => '?').join(', ')})`)
       .bind(batchId, ...COLS.map((c) => (c === 'row_no' ? Number(r[c]) || 0 : String(r[c] ?? '')))));
   }

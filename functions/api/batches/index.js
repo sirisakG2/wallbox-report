@@ -1,5 +1,6 @@
 // GET  /api/batches  → all months with counts
 // POST /api/batches  → create or reopen (same folder) a month batch; returns processed file ids for resume
+import { excelProblems } from '../../../lib/excel-problems.js';
 import { OTHER_PROBLEMS_SQL, bad, folderIdFromUrl, json } from '../../../lib/server.js';
 
 export async function onRequestGet({ request, env }) {
@@ -27,7 +28,9 @@ export async function onRequestGet({ request, env }) {
       (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.file_status = 'deleted') AS deleted_count,
       (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.file_status = 'updated') AS updated_count
     FROM batches b ORDER BY b.month DESC, b.id DESC`).all();
-  return json({ batches: results });
+  const xp = await excelProblems(env.DB);
+  for (const b of results) b.excel_problem_count = xp.filter((x) => x.batch_id === b.id).length;
+  return json({ batches: results, excel_problems: xp.length });
 }
 
 export async function onRequestPost({ request, env }) {

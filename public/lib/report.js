@@ -1,6 +1,6 @@
 // Builds the export workbook (Records, Compare vs Reference, Issues, Summary) with ExcelJS.
 import { api } from './api.js';
-import { PROBLEM_INFO, PROBLEM_TYPES, whatHappened } from './problems.js';
+import { EXCEL_PROBLEM_INFO, EXCEL_PROBLEM_TYPES, PROBLEM_INFO, PROBLEM_TYPES, whatHappened } from './problems.js';
 
 const HEAD_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF141416' } };
 const RED_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE2E1' } };
@@ -254,13 +254,16 @@ export async function downloadWorkbook(ExcelJS, opts) {
 // ---------- Detailed "Other problems" workbook (with explanations in English and Thai) ----------
 
 const WRAP = { wrapText: true, vertical: 'top' };
+const PDF_SRC_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7F1' } };
+const EXCEL_SRC_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDE7FB' } };
 
 export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) {
   const q = batchId ? `batch=${batchId}&` : '';
-  const [{ issues }, { records }, { batches }] = await Promise.all([
+  const [{ issues }, { records }, { batches }, { problems: excelProbs }] = await Promise.all([
     api(`/api/issues?${q}scope=other&resolved=all`),
     api(`/api/records?size=all`),
     api('/api/batches'),
+    api(`/api/excel-problems${batchId ? `?batch=${batchId}` : ''}`),
   ]);
   const byFile = new Map(records.map((r) => [r.pdf_file_id, r]));
   const byVin = new Map(records.map((r) => [r.vin, r]));
@@ -275,19 +278,19 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
 
   // --- Read me
   const rm = wb.addWorksheet('Read me', { views: [{ showGridLines: false }] });
-  rm.columns = [{ width: 26 }, { width: 22 }, { width: 55 }, { width: 55 }, { width: 45 }, { width: 55 }, { width: 55 }, { width: 8 }, { width: 10 }];
+  rm.columns = [{ width: 26 }, { width: 22 }, { width: 55 }, { width: 55 }, { width: 45 }, { width: 55 }, { width: 55 }, { width: 8 }, { width: 10 }, { width: 18 }];
   const t = rm.addRow(['Other problems — explanation and details']);
   t.font = { ...FONT, size: 16, bold: true };
   rm.addRow([`Export: ${label} · generated ${new Date().toLocaleString('en-GB')}`]).font = { ...FONT, color: { argb: 'FF666666' } };
   rm.addRow([]);
   for (const line of [
-    'These are problems that ① Check PDF (file name VIN vs inside the PDF) and ② Check Excel (Excel rows vs PDF) do not show.',
-    'ปัญหาในไฟล์นี้คือปัญหาที่ Check 1 และ Check 2 ไม่ได้แสดง ต้องให้ผู้ดูแลตรวจเอง',
+    'Problems the check tables do not show, split by source: ① from Check PDF (found while reading the PDF files — fix/resolve in the app) and ② from Check Excel (found in the submission Excel — fix in the Excel file, then import the month again).',
+    'ปัญหาแบ่งตามแหล่งที่มา: ① จาก Check PDF (พบตอนอ่านไฟล์ PDF แก้ไข/Resolve ในแอป) และ ② จาก Check Excel (พบในไฟล์ Excel ให้แก้ในไฟล์ Excel แล้ว Import month ใหม่)',
     'How to use: 1) read the explanation of each problem below · 2) go to the sheet of that problem (tabs at the bottom) · 3) open the PDF link, check, and fix or mark it resolved in the app (menu "Other problems").',
     'วิธีใช้: 1) อ่านคำอธิบายแต่ละปัญหาด้านล่าง 2) ไปที่ชีตของปัญหานั้น (แท็บด้านล่าง) 3) คลิกลิงก์ PDF ตรวจสอบ แล้วแก้ไขหรือกด Resolve ในแอป (เมนู Other problems)',
   ]) { const r = rm.addRow([line]); r.font = FONT; rm.mergeCells(r.number, 1, r.number, 9); r.alignment = WRAP; r.height = 30; }
   rm.addRow([]);
-  const head = rm.addRow(['Problem', 'ปัญหา', 'What it means', 'ความหมาย', 'Why it matters', 'What to do', 'สิ่งที่ต้องทำ', 'Open', 'Resolved']);
+  const head = rm.addRow(['Problem', 'ปัญหา', 'What it means', 'ความหมาย', 'Why it matters', 'What to do', 'สิ่งที่ต้องทำ', 'Open', 'Resolved', 'Source']);
   head.eachCell((c) => { c.fill = HEAD_FILL; c.font = { ...FONT, bold: true, color: { argb: 'FFFFFFFF' } }; c.alignment = WRAP; });
   for (const type of PROBLEM_TYPES) {
     const p = PROBLEM_INFO[type];
@@ -299,6 +302,19 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
     r.height = 105;
     r.getCell(1).font = { ...FONT, bold: true };
     r.getCell(8).fill = list.some((i) => !i.resolved) ? AMBER_FILL : GREEN_FILL;
+    r.getCell(10).value = '① Check PDF';
+    r.getCell(10).fill = PDF_SRC_FILL;
+  }
+  for (const type of EXCEL_PROBLEM_TYPES) {
+    const p = EXCEL_PROBLEM_INFO[type];
+    const n = excelProbs.filter((x) => x.type === type).length;
+    const r = rm.addRow([p.name, p.th, p.meaning, p.meaning_th, `${p.why}\n${p.why_th}`, p.action, p.action_th, n, '–', '② Check Excel']);
+    r.font = FONT;
+    r.alignment = WRAP;
+    r.height = 105;
+    r.getCell(1).font = { ...FONT, bold: true };
+    r.getCell(8).fill = n ? AMBER_FILL : GREEN_FILL;
+    r.getCell(10).fill = EXCEL_SRC_FILL;
   }
 
   // --- All problems
@@ -306,6 +322,7 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
     const r = recOf(i);
     const b = batchOf.get(i.batch_id);
     return {
+      source: '① Check PDF',
       problem: PROBLEM_INFO[i.type]?.name || i.type,
       status: i.resolved ? 'Resolved' : 'Open',
       month: i.month || b?.month || '',
@@ -322,6 +339,7 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
     };
   };
   const commonCols = [
+    { header: 'Source', key: 'source', width: 14 },
     { header: 'Problem', key: 'problem', width: 22 },
     { header: 'Status', key: 'status', width: 10 },
     { header: 'Month', key: 'month', width: 9 },
@@ -340,7 +358,18 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
   ];
   const statusFill = (row, i) => { row.getCell('status').fill = i.resolved ? GREEN_FILL : AMBER_FILL; };
   const sorted = [...issues].sort((a, b) => a.resolved - b.resolved || PROBLEM_TYPES.indexOf(a.type) - PROBLEM_TYPES.indexOf(b.type));
-  addSheet(wb, 'All problems', [...commonCols, ...tailCols], sorted.map(common), (row, x, i = sorted[row.number - 2]) => statusFill(row, i));
+  const excelRows = excelProbs.map((x) => ({
+    source: '② Check Excel', problem: EXCEL_PROBLEM_INFO[x.type]?.name || x.type, status: 'Fix in Excel', month: x.month,
+    vin: x.excel_vin, customer: x.customer_name || '', job: x.case_number || '', pdf_name: x.suggestion?.pdf_name || '',
+    pdf_link: driveLink(x.suggestion?.pdf_file_id), excel_row: `${x.sheet_name || ''} · row ${x.row_no}`, excel_link: excelLink(x.excel_file_id),
+    what: x.detail + (x.suggestion ? ` — suggested PDF: ${x.suggestion.vin} (${x.suggestion.how})` : ''), todo: EXCEL_PROBLEM_INFO[x.type]?.action || '', found: '',
+  }));
+  const allRows = [...sorted.map(common), ...excelRows];
+  addSheet(wb, 'All problems', [...commonCols, ...tailCols], allRows, (row) => {
+    const x = allRows[row.number - 2];
+    row.getCell('source').fill = x.source.startsWith('②') ? EXCEL_SRC_FILL : PDF_SRC_FILL;
+    row.getCell('status').fill = x.status === 'Resolved' ? GREEN_FILL : AMBER_FILL;
+  });
 
   // --- One sheet per problem type, with the columns that matter for it
   const extra = {
@@ -387,12 +416,39 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
     const ws = addSheet(wb, PROBLEM_INFO[type].sheet, [...commonCols, ...x.cols, ...tailCols],
       list.map((i) => ({ ...common(i), ...x.row(i, recOf(i)) })), (row) => statusFill(row, list[row.number - 2]));
     // Explanation above the table.
-    ws.spliceRows(1, 0, [`${PROBLEM_INFO[type].name} — ${PROBLEM_INFO[type].th}`], [PROBLEM_INFO[type].meaning], [`What to do: ${PROBLEM_INFO[type].action}`], []);
+    ws.spliceRows(1, 0, [`① ${PROBLEM_INFO[type].name} — ${PROBLEM_INFO[type].th}`], [PROBLEM_INFO[type].meaning], [`What to do: ${PROBLEM_INFO[type].action}`], []);
     for (const n of [1, 2, 3]) { ws.mergeCells(n, 1, n, 8); ws.getRow(n).alignment = WRAP; ws.getRow(n).font = { ...FONT, bold: n === 1, size: n === 1 ? 13 : 10 }; }
     ws.getRow(2).height = 30;
     ws.getRow(3).height = 30;
     ws.views = [{ state: 'frozen', ySplit: 5 }];
     ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: ws.columnCount } };
+  }
+
+  if (excelProbs.length) {
+    const ws = addSheet(wb, '② Excel problems', [
+      { header: 'Problem', key: 'problem', width: 26 },
+      { header: 'Month', key: 'month', width: 9 },
+      { header: 'Excel sheet', key: 'sheet', width: 16 },
+      { header: 'Excel row', key: 'row', width: 9 },
+      { header: 'VIN cell in Excel (col H)', key: 'excel_vin', width: 24 },
+      { header: 'Customer (Excel col D)', key: 'customer', width: 30 },
+      { header: 'Case number (Excel)', key: 'case', width: 15 },
+      { header: 'Suggested PDF VIN', key: 'sug_vin', width: 21 },
+      { header: 'How it was matched', key: 'sug_how', width: 26 },
+      { header: 'Suggested PDF customer', key: 'sug_name', width: 28 },
+      { header: 'Suggested PDF', key: 'sug_link', width: 12 },
+      { header: 'What to do', key: 'todo', width: 60, style: { alignment: WRAP } },
+      { header: 'Excel link', key: 'excel_link', width: 11 },
+    ], excelProbs.map((x) => ({
+      problem: EXCEL_PROBLEM_INFO[x.type]?.name || x.type, month: x.month, sheet: x.sheet_name, row: x.row_no, excel_vin: x.excel_vin,
+      customer: x.customer_name, case: x.case_number || '', sug_vin: x.suggestion?.vin || 'no match found', sug_how: x.suggestion?.how || '',
+      sug_name: x.suggestion?.customer_name || '', sug_link: driveLink(x.suggestion?.pdf_file_id), todo: EXCEL_PROBLEM_INFO[x.type]?.action || '',
+      excel_link: excelLink(x.excel_file_id),
+    })), (row) => { row.getCell('excel_vin').fill = RED_FILL; });
+    ws.spliceRows(1, 0, ['② From Check Excel — problems in the submission Excel (fix in the Excel file, then import the month again)'], []);
+    ws.getRow(1).font = { ...FONT, size: 13, bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 3 }];
+    ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: ws.columnCount } };
   }
   return wb;
 }

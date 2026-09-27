@@ -56,13 +56,17 @@ function readSheet(ws, sheetType) {
   for (let r = headerRow + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     const get = (k) => (cols[k] ? row.getCell(cols[k]).value : null);
-    const vin = normalizeVin(cellText(get('vin')));
-    if (!VIN_RE.test(vin)) continue;
+    const rawVin = cellText(get('vin')).trim();
+    const vin = normalizeVin(rawVin);
+    const valid = VIN_RE.test(vin);
+    // Keep install rows whose VIN cell has something that is not a VIN (e.g. "ติดตั้งก่อนรับรถ" or a typo)
+    // so they can be listed as Excel problems; empty VIN cells are notes/footer rows and are skipped.
+    if (!valid && !(sheetType === 'install' && rawVin && cellText(get('customer_name')).trim())) continue;
     rows.push({
-      sheet: sheetType,
+      sheet: valid ? sheetType : 'install_invalid',
+      vin: valid ? vin : rawVin,
       sheet_name: ws.name,
       row_no: r,
-      vin,
       case_number: cellText(get('case_number')).trim(),
       customer_name: cleanThai(cellText(get('customer_name')).trim()),
       install_date: toIsoDate(get('install_date')),

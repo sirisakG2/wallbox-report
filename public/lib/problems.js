@@ -57,6 +57,38 @@ export const PROBLEM_INFO = {
   },
 };
 
+// Problems in the submission Excel itself (source ② Check Excel) — found live, fixed in the Excel file.
+export const EXCEL_PROBLEM_INFO = {
+  excel_no_vin: {
+    name: 'VIN missing in Excel', th: 'ไม่มี VIN ใน Excel', tone: 'bad', sheet: 'Excel VIN missing',
+    meaning: 'The VIN cell (column H) has text instead of a VIN — usually "ติดตั้งก่อนรับรถ" (the charger was installed before the car was delivered). This row cannot be matched to a PDF by VIN.',
+    meaning_th: 'ช่อง VIN (คอลัมน์ H) เป็นข้อความแทน VIN ส่วนใหญ่เป็น "ติดตั้งก่อนรับรถ" จึงจับคู่กับ PDF ด้วย VIN ไม่ได้',
+    why: 'The installation cannot be verified against the PDF, and the VIN is needed for billing and warranty.',
+    why_th: 'ตรวจสอบกับ PDF ไม่ได้ และต้องใช้ VIN ในการเบิกเงินและรับประกัน',
+    action: 'Use the suggested PDF (same customer name) to find the real VIN. If the PDF also has no real VIN yet, ask for the VIN after the car is delivered. Put the VIN into column H and import the month again.',
+    action_th: 'ดู PDF ที่ระบบแนะนำ (ชื่อลูกค้าเดียวกัน) เพื่อหา VIN จริง ถ้า PDF ยังไม่มี VIN จริงให้ขอ VIN หลังส่งมอบรถ ใส่ VIN ในคอลัมน์ H แล้ว Import month ใหม่',
+  },
+  excel_bad_vin: {
+    name: 'VIN typo in Excel', th: 'VIN ใน Excel พิมพ์ผิด', tone: 'bad', sheet: 'Excel VIN typo',
+    meaning: 'The VIN in column H looks like a VIN but is not valid (wrong length or a wrong character).',
+    meaning_th: 'VIN ในคอลัมน์ H คล้าย VIN แต่ไม่ถูกต้อง (จำนวนตัวอักษรผิด หรือพิมพ์ผิด)',
+    why: 'This Excel row cannot be matched to its PDF.',
+    why_th: 'จับคู่แถวนี้กับ PDF ไม่ได้',
+    action: 'Compare with the suggested PDF VIN (closest match), correct column H and import the month again.',
+    action_th: 'เทียบกับ VIN ใน PDF ที่ระบบแนะนำ แก้คอลัมน์ H ให้ถูกต้อง แล้ว Import month ใหม่',
+  },
+  excel_other_month: {
+    name: "PDF in another month's Excel", th: 'PDF อยู่ใน Excel ของเดือนอื่น', tone: 'warn', sheet: 'Other month Excel',
+    meaning: "The PDF is in this month's folder, but its VIN is listed in another month's Excel, not in this month's.",
+    meaning_th: 'ไฟล์ PDF อยู่ในโฟลเดอร์เดือนนี้ แต่ VIN อยู่ใน Excel ของเดือนอื่น ไม่ใช่เดือนนี้',
+    why: 'The installation may be billed in the wrong month, or twice.',
+    why_th: 'อาจเบิกเงินผิดเดือน หรือเบิกซ้ำ',
+    action: 'Check which month the installation belongs to. Move the PDF to the right month\'s folder or fix the Excel.',
+    action_th: 'ตรวจว่างานนี้เป็นของเดือนไหน ย้าย PDF ไปโฟลเดอร์เดือนที่ถูกต้อง หรือแก้ Excel',
+  },
+};
+export const EXCEL_PROBLEM_TYPES = Object.keys(EXCEL_PROBLEM_INFO);
+
 export const PROBLEM_TYPES = Object.keys(PROBLEM_INFO);
 
 // Plain-language "what happened" for one problem row.
