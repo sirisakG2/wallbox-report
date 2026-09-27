@@ -124,14 +124,7 @@ async function renderDashboard() {
       <div><h1>Dashboard</h1><p>All imported months at a glance.</p></div>
       <button class="btn primary lg" data-go="import">${ICON.play} Import a month</button>
     </div>
-    <div class="grid cols-4">
-      <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
-      <a class="card kpi kpi-link" href="#/records?conf=review"><div class="label">To review</div><div class="value" style="color:${s.to_review ? 'var(--warn)' : 'inherit'}">${fmtN(s.to_review)}</div><div class="sub">VIN or date below 95% · ${fmtN(s.full_conf)} at 100%</div></a>
-      <div class="card kpi"><div class="label">In reference Excel</div><div class="value">${pct(s.matched, s.reference_rows)}%</div><div class="sub">${fmtN(s.matched)} of ${fmtN(s.reference_rows)} rows have a PDF</div></div>
-      <div class="card kpi"><div class="label">Open issues</div><div class="value" style="color:${s.open_issues ? 'var(--warn)' : 'inherit'}">${fmtN(s.open_issues)}</div><div class="sub">need a look</div></div>
-    </div>
-
-    <div class="card section-gap">
+    <div class="card" style="margin-bottom:16px">
       <div class="card-head"><h2>VIN check — file name vs VIN photo vs paper VIN box</h2><span class="faint">file name is the reference</span></div>
       <div class="grid cols-3 card-pad">
         ${[1, 2, 3].map((l) => {
@@ -145,6 +138,13 @@ async function renderDashboard() {
             <div class="sub" style="margin-top:8px">${desc}</div></a>`;
         }).join('')}
       </div>
+    </div>
+
+    <div class="grid cols-4">
+      <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
+      <a class="card kpi kpi-link" href="#/records?conf=review"><div class="label">To review</div><div class="value" style="color:${s.to_review ? 'var(--warn)' : 'inherit'}">${fmtN(s.to_review)}</div><div class="sub">VIN or date below 95% · ${fmtN(s.full_conf)} at 100%</div></a>
+      <div class="card kpi"><div class="label">In reference Excel</div><div class="value">${pct(s.matched, s.reference_rows)}%</div><div class="sub">${fmtN(s.matched)} of ${fmtN(s.reference_rows)} rows have a PDF</div></div>
+      <div class="card kpi"><div class="label">Open issues</div><div class="value" style="color:${s.open_issues ? 'var(--warn)' : 'inherit'}">${fmtN(s.open_issues)}</div><div class="sub">need a look</div></div>
     </div>
 
     <div class="grid cols-2 section-gap">
