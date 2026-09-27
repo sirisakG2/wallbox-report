@@ -386,3 +386,21 @@ td.warn-cell { background: var(--warn-soft); color: var(--warn); }
 .h-time { color: var(--text-3); }
 .h-old { text-decoration: line-through; color: var(--text-3); }
 .h-new { color: var(--ok); font-weight: 600; }
+
+/* Check tabs */
+.tab-check { gap: 10px; }
+.tab-num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 750; font-size: 12.5px; border: 1px solid var(--accent); flex: none; }
+.tab-num.big { width: 34px; height: 34px; font-size: 18px; vertical-align: 4px; margin-right: 6px; }
+.tab-2l { display: flex; flex-direction: column; line-height: 1.15; text-align: left; }
+.tab-2l b { font-weight: 600; }
+.tab-2l small { font-size: 11px; color: var(--text-3); font-weight: 500; }
+.tab.active .tab-2l small { color: var(--text-2); }
+.tabs-inner { height: 56px; }
+.card-head h2 .tab-num { margin-right: 6px; vertical-align: 1px; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; padding: 10px 20px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--text-2); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.month-chip { font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.chip-ok.active { border-color: var(--ok); background: var(--ok-soft); }
+.chip-warn.active { border-color: var(--warn); background: var(--warn-soft); }
+.chip-bad.active { border-color: var(--bad); background: var(--bad-soft); }
+.chip-info.active { border-color: var(--info); background: var(--info-soft); }

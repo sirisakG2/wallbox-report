@@ -28,6 +28,9 @@ export async function onRequestGet({ request, env }) {
     `SELECT r.*, b.month, ${CONFIDENCE_COLUMNS} FROM records r JOIN batches b ON b.id = r.batch_id ${w}
      ORDER BY r.install_date DESC, r.vin`).bind(...vals).all();
   let rows = results.map(withConfidence);
+  // Counts per check result for the rows matching the other filters (for the filter chips).
+  const facets = { vin: { 1: 0, 2: 0, 3: 0 }, excel: { match: 0, close: 0, different: 0, missing: 0 }, review: 0 };
+  for (const r of rows) { facets.vin[r.vin_level]++; facets.excel[r.excel_status]++; if (needsReview(r)) facets.review++; }
 
   const conf = p.get('conf');
   if (conf === 'review') {
@@ -45,5 +48,5 @@ export async function onRequestGet({ request, env }) {
   const all = p.get('size') === 'all';
   const size = all ? total || 1 : Math.min(Math.max(Number(p.get('size')) || 50, 1), 500);
   const page = all ? 1 : Math.max(Number(p.get('page')) || 1, 1);
-  return json({ total, page, size, records: rows.slice((page - 1) * size, page * size) });
+  return json({ total, page, size, facets, records: rows.slice((page - 1) * size, page * size) });
 }

@@ -105,12 +105,16 @@ function go(name, params = {}) {
   location.hash = `#/${name}${qs ? `?${qs}` : ''}`;
 }
 
-const VIEWS = { dashboard: renderDashboard, import: renderImport, records: renderRecords, compare: renderCompare, issues: renderIssues, months: renderMonths, export: renderExport };
+const VIEWS = {
+  dashboard: renderDashboard, import: renderImport, 'check-pdf': renderCheckPdf, 'check-excel': renderCheckExcel,
+  records: renderRecords, compare: renderCompare, issues: renderIssues, months: renderMonths, export: renderExport,
+};
 
 async function route() {
   const { name, params } = parseHash();
   const fn = VIEWS[name] || renderDashboard;
-  $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === (VIEWS[name] ? name : 'dashboard')));
+  const tabName = name === 'compare' ? 'check-excel' : VIEWS[name] ? name : 'dashboard';
+  $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === tabName));
   // A running import keeps going when switching tabs; renderImport re-attaches its view.
   try {
     await loadBatches();
@@ -131,13 +135,13 @@ async function renderDashboard() {
       <button class="btn primary lg" data-go="import">${ICON.play} Import a month</button>
     </div>
     <div class="card" style="margin-bottom:16px">
-      <div class="card-head"><h2>VIN check — file name vs VIN photo vs paper VIN box</h2><span class="faint">file name is the reference</span></div>
+      <div class="card-head"><h2><span class="tab-num">1</span> Check PDF — file name VIN vs VIN photo vs paper VIN box</h2><span class="faint">file name is the reference</span></div>
       <div class="grid cols-3 card-pad">
         ${[1, 2, 3].map((l) => {
           const n = s.vin_levels[l];
           const desc = { 1: 'File name = photo = paper VIN box', 2: 'Photo confirms the file name — paper VIN box differs', 3: 'Photo does not confirm the file name — check the PDF' }[l];
           const tone = { 1: 'ok', 2: 'warn', 3: 'bad' }[l];
-          return `<a class="card kpi kpi-link level-card ${tone}" href="#/records?vinlevel=${l}" style="box-shadow:none;background:var(--surface-2)">
+          return `<a class="card kpi kpi-link level-card ${tone}" href="#/check-pdf?vinlevel=${l}" style="box-shadow:none;background:var(--surface-2)">
             <div class="label">${LEVEL[l][1]}</div>
             <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.records)}%</span></div>
             <div class="meter"><i style="width:${pct(n, s.records)}%"></i></div>
@@ -147,12 +151,12 @@ async function renderDashboard() {
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-head"><h2>Excel check — file name VIN found in Excel column H · customer name vs column D</h2><span class="faint">confidence % = name similarity</span></div>
+      <div class="card-head"><h2><span class="tab-num">2</span> Check Excel — file name VIN in Excel column H · customer name vs column D</h2><span class="faint">confidence % = name similarity</span></div>
       <div class="grid cols-4 card-pad">
         ${[['match', 'Name matches (≥95%)'], ['close', 'Small spelling difference or partial name (80–94%)'], ['different', 'Different name (<80%)'], ['missing', 'VIN not in the submission Excel']].map(([k, desc]) => {
           const n = s.excel[k];
           const tone = XL[k][0];
-          return `<a class="card kpi kpi-link level-card ${tone}" href="#/records?excel=${k}" style="box-shadow:none;background:var(--surface-2)">
+          return `<a class="card kpi kpi-link level-card ${tone}" href="#/check-excel?excel=${k}" style="box-shadow:none;background:var(--surface-2)">
             <div class="label">${XL[k][1]}</div>
             <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.records)}%</span></div>
             <div class="meter"><i style="width:${pct(n, s.records)}%"></i></div>
@@ -209,7 +213,8 @@ function monthCard(b) {
       <div class="row-actions">
         <button class="btn sm primary" data-summary="${b.id}">Summary</button>
         <button class="btn sm" data-go="records" data-batch="${b.id}">Records</button>
-        <button class="btn sm" data-go="compare" data-batch="${b.id}">Compare</button>
+        <button class="btn sm" data-go="check-pdf" data-batch="${b.id}">Check PDF</button>
+        <button class="btn sm" data-go="check-excel" data-batch="${b.id}">Check Excel</button>
         <button class="btn sm" data-go="issues" data-batch="${b.id}">Issues</button>
         <button class="btn sm" data-export="${b.id}">${ICON.download} Excel</button>
       </div>
@@ -375,7 +380,8 @@ function renderImport(params) {
       acts.innerHTML = `
         <button class="btn primary" data-summary="${batch.id}">Import summary</button>
         <button class="btn" data-go="records" data-batch="${batch.id}">View records</button>
-        <button class="btn" data-go="compare" data-batch="${batch.id}">Compare with reference</button>
+        <button class="btn" data-go="check-pdf" data-batch="${batch.id}">Check PDF</button>
+        <button class="btn" data-go="check-excel" data-batch="${batch.id}">Check Excel</button>
         <button class="btn" data-go="issues" data-batch="${batch.id}">Issues</button>
         <button class="btn" data-export="${batch.id}">${ICON.download} Download Excel</button>`;
       acts.hidden = false;
@@ -417,6 +423,131 @@ function changesPanel(plan) {
       ${plan.deleted.length ? `<div class="change-block"><b>Deleted</b> — no longer in the folder; records are kept and marked “Deleted”${list(plan.deleted, (d) => `${esc(d.name)}${d.vin ? ` <span class="mono faint">${esc(d.vin)}</span>` : ''}`)}</div>` : ''}
       ${plan.new.length ? `<div class="change-block"><b>New</b>${list(plan.new, (f) => esc(f.name))}</div>` : ''}
     </div>`;
+}
+
+// ---------- Check 1 · PDF / Check 2 · Excel ----------
+function checkChips(view, params, key, options, facets, total) {
+  const cur = params.get(key) || '';
+  const base = { batch: params.get('batch') || '' };
+  return `<div class="chips">
+    <button class="chip ${!cur ? 'active' : ''}" data-chip-go="${view}" data-params='${esc(JSON.stringify(base))}'>All <b>${fmtN(total)}</b></button>
+    ${options.map(([v, label, n, tone]) => `<button class="chip chip-${tone} ${cur === v ? 'active' : ''}" data-chip-go="${view}" data-params='${esc(JSON.stringify({ ...base, [key]: v }))}'>${label} <b>${fmtN(n)}</b></button>`).join('')}
+  </div>`;
+}
+
+function wireCheckPage(view, data) {
+  $$('[data-chip-go]').forEach((c) => { c.onclick = () => go(c.dataset.chipGo, JSON.parse(c.dataset.params)); });
+  $('#ckBatch').onchange = (e) => { const p = parseHash().params; p.set('batch', e.target.value); p.delete('page'); go(view, Object.fromEntries(p)); };
+  $$('tbody tr[data-i]').forEach((tr) => { tr.onclick = () => openRecord(data.records[Number(tr.dataset.i)]); });
+  const page = data.page;
+  const pages = Math.max(1, Math.ceil(data.total / data.size));
+  const nav = (n) => { const p = Object.fromEntries(parseHash().params); go(view, { ...p, page: n }); };
+  $('#prevP') && ($('#prevP').onclick = () => nav(page - 1));
+  $('#nextP') && ($('#nextP').onclick = () => nav(page + 1));
+  $('#prevP') && ($('#prevP').disabled = page <= 1);
+  $('#nextP') && ($('#nextP').disabled = page >= pages);
+}
+
+const pager = (data) => `<div class="pager"><span>${fmtN(data.total)} record${data.total === 1 ? '' : 's'} · page ${data.page} of ${Math.max(1, Math.ceil(data.total / data.size))}</span>
+  <div class="row-actions"><button class="btn sm" id="prevP">← Previous</button><button class="btn sm" id="nextP">Next →</button></div></div>`;
+
+async function renderCheckPdf(params) {
+  const q = new URLSearchParams({ page: Number(params.get('page')) || 1, size: 50 });
+  for (const k of ['batch', 'vinlevel']) if (params.get(k)) q.set(k, params.get(k));
+  const data = await api(`/api/records?${q}`);
+  const all = await api(`/api/records?${new URLSearchParams({ size: 1, ...(params.get('batch') ? { batch: params.get('batch') } : {}) })}`);
+  const f = all.facets.vin;
+  view.innerHTML = `
+    <div class="view-head"><div><h1><span class="tab-num big">1</span> Check PDF</h1>
+      <p>Is the VIN in the <b>file name</b> the same as the VIN <b>inside the PDF</b>? The file name is the reference; the VIN photo must confirm it; the paper VIN box is checked too.</p></div>
+      <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Export Excel</button></div>
+    <div class="card">
+      <div class="toolbar">
+        <div class="field"><label>Month</label><select class="select" id="ckBatch">${monthOptions(params.get('batch'))}</select></div>
+        <div class="field grow"><label>Result</label>${checkChips('check-pdf', params, 'vinlevel', [
+          ['1', '① Match 3/3', f[1], 'ok'], ['2', '② File = Photo', f[2], 'warn'], ['3', '③ Not matched', f[3], 'bad']], null, all.total)}</div>
+      </div>
+      <div class="legend"><span>${vinLevelPill(1)} file name = photo = paper</span><span>${vinLevelPill(2)} photo confirms file name, paper box differs</span><span>${vinLevelPill(3)} photo does not confirm file name → open the PDF</span></div>
+      <div class="table-wrap">
+        ${data.records.length ? `<table>
+          <thead><tr><th>Month</th><th>VIN in file name</th><th>VIN photo</th><th>Paper VIN box</th><th>Result</th><th>Read by</th><th>Customer</th><th></th></tr></thead>
+          <tbody>${data.records.map((r, i) => `
+            <tr class="clickable" data-i="${i}">
+              <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td>
+              <td class="mono">${esc(r.file_vin) || '<span class="faint">none</span>'}</td>
+              <td class="mono ${r.vin_picture && r.vin_picture !== r.file_vin ? 'bad-cell' : ''}">${esc(r.vin_picture) || `<span class="faint">${r.charger_photo ? 'charger photo' : 'not read'}</span>`}</td>
+              <td class="mono ${r.paper_vin !== r.file_vin ? 'warn-cell' : ''}">${esc(r.paper_vin) || '<span class="faint">–</span>'}</td>
+              <td title="${esc(r.vin_conf_reasons.join(' · '))}">${vinLevelPill(r.vin_level)}</td>
+              <td>${readByPill(r.vin_read_by)}</td>
+              <td>${esc(r.customer_name)}</td>
+              <td style="white-space:nowrap"><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a></td>
+            </tr>`).join('')}</tbody></table>` : '<div class="empty">Nothing here.</div>'}
+      </div>
+      ${pager(data)}
+    </div>`;
+  wireCheckPage('check-pdf', data);
+}
+
+async function renderCheckExcel(params) {
+  const batch = params.get('batch') || '';
+  const excel = params.get('excel') || '';
+  const all = await api(`/api/records?${new URLSearchParams({ size: 1, ...(batch ? { batch } : {}) })}`);
+  const f = all.facets.excel;
+  const cmp = await api(`/api/compare${batch ? `?batch=${batch}` : ''}`);
+  const excelOnly = cmp.rows.filter((x) => x.status === 'Reference only');
+  let data = { records: [], total: 0, page: 1, size: 50 };
+  if (excel !== 'excel_only') {
+    const q = new URLSearchParams({ page: Number(params.get('page')) || 1, size: 50 });
+    if (batch) q.set('batch', batch);
+    if (excel) q.set('excel', excel);
+    data = await api(`/api/records?${q}`);
+  }
+  const monthExcel = state.batches.find((b) => String(b.id) === String(batch));
+  view.innerHTML = `
+    <div class="view-head"><div><h1><span class="tab-num big">2</span> Check Excel</h1>
+      <p>Is the VIN in the <b>file name</b> in the submission <b>Excel</b> (column H), and is the customer name the same (column D)? % = how similar the names are.</p></div>
+      <div class="row-actions">
+        ${monthExcel?.reference_file_id ? `<a class="btn" href="${excelUrl(monthExcel.reference_file_id)}" target="_blank" rel="noopener">Open ${esc(fmtMonth(monthExcel.month))} Excel ${ICON.ext}</a>` : ''}
+        <button class="btn" data-export="${esc(batch)}">${ICON.download} Export Excel</button></div></div>
+    <div class="card">
+      <div class="toolbar">
+        <div class="field"><label>Month</label><select class="select" id="ckBatch">${monthOptions(batch)}</select></div>
+        <div class="field grow"><label>Result</label>${checkChips('check-excel', params, 'excel', [
+          ['match', 'Match ≥95%', f.match, 'ok'], ['close', 'Close 80–94%', f.close, 'warn'], ['different', 'Different <80%', f.different, 'bad'],
+          ['missing', 'PDF not in Excel', f.missing, 'bad'], ['excel_only', 'Excel row with no PDF', excelOnly.length, 'info']], null, all.total)}</div>
+      </div>
+      ${excel === 'excel_only' ? `
+        <div class="legend"><span>Rows in the submission Excel whose VIN has no PDF in the folder.</span></div>
+        <div class="table-wrap">${excelOnly.length ? `<table>
+          <thead><tr><th>Month</th><th>VIN (Excel col H)</th><th>Customer (Excel col D)</th><th>Excel row</th><th>Install date (Excel)</th><th>Case number</th><th></th></tr></thead>
+          <tbody>${excelOnly.map((x) => `<tr>
+            <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
+            <td class="mono">${esc(x.vin)}</td><td>${esc(x.reference?.customer_name)}</td>
+            <td class="num">${esc(x.reference?.sheet_name || '')} ${esc(x.reference?.row_no || '')}</td>
+            <td class="num">${esc(fmtDate(x.reference?.install_date))}</td><td class="mono">${esc(x.reference?.case_number)}</td>
+            <td>${x.record ? `<span class="pill warn">PDF in ${esc(fmtMonth(x.record.month))}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Every Excel row has a PDF.</div>'}</div>`
+      : `
+        <div class="legend"><span>${excelPill('match', 100, false)} VIN found, name matches</span><span>${excelPill('close', 90, false)} small spelling difference / partial name</span><span>${excelPill('different', 0, false)} different name</span><span>${excelPill('missing', 0, false)} VIN not in column H</span></div>
+        <div class="table-wrap">
+          ${data.records.length ? `<table>
+            <thead><tr><th>Month</th><th>VIN in file name</th><th>Result</th><th>Customer in PDF</th><th>Customer in Excel (col D)</th><th>Excel row</th><th>Date PDF / Excel</th><th></th></tr></thead>
+            <tbody>${data.records.map((r, i) => `
+              <tr class="clickable" data-i="${i}">
+                <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td>
+                <td class="mono">${esc(r.vin)}</td>
+                <td title="${esc(r.excel_reasons.join(' · '))}">${excelPill(r.excel_status, r.excel_conf)}</td>
+                <td class="${r.excel_status === 'different' ? 'bad-cell' : r.excel_status === 'close' ? 'warn-cell' : ''}">${esc(r.customer_name)}</td>
+                <td>${esc(r.ref_name) || '<span class="faint">–</span>'}</td>
+                <td class="num">${r.ref_row ? `${esc(r.ref_sheet_name)} · ${esc(r.ref_row)}` : '<span class="faint">–</span>'}</td>
+                <td><div class="stack"><span class="num">${esc(fmtDate(r.install_date)) || '–'}</span><small>${esc(fmtDate(r.ref_date)) || '–'}</small></div></td>
+                <td style="white-space:nowrap">
+                  <a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a>
+                  ${excelUrl(r.ref_file_id || r.month_ref_file_id) ? ` · <a href="${excelUrl(r.ref_file_id || r.month_ref_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Excel ${ICON.ext}</a>` : ''}</td>
+              </tr>`).join('')}</tbody></table>` : '<div class="empty">Nothing here.</div>'}
+        </div>
+        ${pager(data)}`}
+    </div>`;
+  wireCheckPage('check-excel', data);
 }
 
 // ---------- Records ----------
@@ -659,7 +790,7 @@ async function openSummary(batchId) {
         <a href="#/records?batch=${b}&fstatus=deleted" data-close-summary><span class="pill bad plain">Deleted ${fmtN(c.deleted_files)}</span></a></dd></div>
       <div class="kv" style="border:0"><dt>VIN photos read by</dt><dd><span class="pill ok plain">Free ${fmtN(c.read_free)}</span> <span class="pill info plain">AI ${fmtN(c.read_ai)}</span></dd></div>
       <div class="row-actions" style="margin-top:8px">
-        <button class="btn" data-sum-go="compare">Compare with reference</button>
+        <button class="btn" data-sum-go="check-excel">Check Excel</button>
         <button class="btn" data-sum-export>${ICON.download} Download Excel</button>
       </div>
     </div>`;
@@ -671,7 +802,7 @@ async function openSummary(batchId) {
     const [, n, , , [view_, params]] = rows[Number(tr.dataset.row)];
     if (n) tr.onclick = () => { close(); go(view_, params); };
   });
-  $('[data-sum-go]', d).onclick = () => { close(); go('compare', { batch: b }); };
+  $('[data-sum-go]', d).onclick = () => { close(); go('check-excel', { batch: b }); };
   $$('[data-close-summary]', d).forEach((a) => { a.onclick = close; });
   $('[data-sum-export]', d).onclick = () => exportExcel(b);
   document.addEventListener('keydown', onKey);
