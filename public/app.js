@@ -49,6 +49,18 @@ function excelPill(status, score, withPct = true) {
   const [tone, label] = XL[status] || ['neutral', '–'];
   return `<span class="pill ${tone} plain lvl">${label}${withPct && status !== 'missing' ? ` ${score}%` : ''}</span>`;
 }
+const BAND = { full: ['ok', '100%'], high: ['ok', '90–99%'], medium: ['warn', '70–89%'], low: ['bad', 'Below 70%'], nopdf: ['bad', 'No PDF'], pdfonly: ['info', 'PDF not in Excel'], noexcel: ['bad', 'Not in Excel'] };
+function matchPct(score, band) {
+  const [tone] = BAND[band] || ['neutral'];
+  if (band === 'nopdf' || band === 'noexcel') return `<span class="pill ${tone} plain lvl">${BAND[band][1]}</span>`;
+  return `<span class="pill ${tone} plain conf">${score}%</span>`;
+}
+const tick = (ok, pts) => (ok ? `<span class="ok-mark" title="+${pts}">✔</span>` : '<span class="bad-mark">✘</span>');
+function dateMark(days) {
+  if (days === 0) return '<span class="ok-mark" title="+20">✔</span>';
+  if (days !== null && days <= 3) return `<span class="warn-mark" title="+10">${days}d</span>`;
+  return days === null ? '<span class="faint">–</span>' : `<span class="bad-mark">${days}d</span>`;
+}
 function fileStatusPill(r) {
   if (r.file_status === 'updated') return `<span class="pill info" title="PDF changed in Drive and was read again">Updated ${esc(fmtDate(r.file_status_at))}</span>`;
   if (r.file_status === 'deleted') return `<span class="pill bad" title="PDF is no longer in the Drive folder — record kept">Deleted ${esc(fmtDate(r.file_status_at))}</span>`;
@@ -116,6 +128,7 @@ async function route() {
   const tabName = name === 'compare' ? 'check-excel' : VIEWS[name] ? name : 'dashboard';
   $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === tabName));
   // A running import keeps going when switching tabs; renderImport re-attaches its view.
+  $$('.drawer, .drawer-backdrop').forEach((x) => x.remove());
   try {
     await loadBatches();
     await fn(params);
@@ -151,18 +164,19 @@ async function renderDashboard() {
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-head"><h2><span class="tab-num">2</span> Check Excel — file name VIN in Excel column H · customer name vs column D</h2><span class="faint">confidence % = name similarity</span></div>
-      <div class="grid cols-4 card-pad">
-        ${[['match', 'Name matches (≥95%)'], ['close', 'Small spelling difference or partial name (80–94%)'], ['different', 'Different name (<80%)'], ['missing', 'VIN not in the submission Excel']].map(([k, desc]) => {
-          const n = s.excel[k];
-          const tone = XL[k][0];
-          return `<a class="card kpi kpi-link level-card ${tone}" href="#/check-excel?excel=${k}" style="box-shadow:none;background:var(--surface-2)">
-            <div class="label">${XL[k][1]}</div>
-            <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.records)}%</span></div>
-            <div class="meter"><i style="width:${pct(n, s.records)}%"></i></div>
+      <div class="card-head"><h2><span class="tab-num">2</span> Check Excel — Excel rows as baseline, looked up in the PDFs</h2><span class="faint">% match = VIN (file · photo · paper) + name + case number + date</span></div>
+      <div class="grid cols-5 card-pad">
+        ${[['full', 'Everything matches'], ['high', 'Nearly everything matches'], ['medium', 'Some fields differ — check'], ['low', 'Many fields differ'], ['nopdf', 'Excel row with no PDF']].map(([k, desc]) => {
+          const n = s.baseline[k];
+          const tone = BAND[k][0];
+          return `<a class="card kpi kpi-link level-card ${tone}" href="#/check-excel?band=${k}" style="box-shadow:none;background:var(--surface-2)">
+            <div class="label">${BAND[k][1]}</div>
+            <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.baseline.excel_rows)}%</span></div>
+            <div class="meter"><i style="width:${pct(n, s.baseline.excel_rows)}%"></i></div>
             <div class="sub" style="margin-top:8px">${desc}</div></a>`;
         }).join('')}
       </div>
+      <div class="legend" style="border-top:1px solid var(--border);border-bottom:0">${fmtN(s.baseline.excel_rows)} Excel rows · <a href="#/check-excel?band=pdfonly">${fmtN(s.baseline.pdfonly)} PDFs not in any Excel</a></div>
     </div>
     <div class="grid cols-4">
       <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
@@ -490,64 +504,75 @@ async function renderCheckPdf(params) {
 
 async function renderCheckExcel(params) {
   const batch = params.get('batch') || '';
-  const excel = params.get('excel') || '';
-  const all = await api(`/api/records?${new URLSearchParams({ size: 1, ...(batch ? { batch } : {}) })}`);
-  const f = all.facets.excel;
-  const cmp = await api(`/api/compare${batch ? `?batch=${batch}` : ''}`);
-  const excelOnly = cmp.rows.filter((x) => x.status === 'Reference only');
-  let data = { records: [], total: 0, page: 1, size: 50 };
-  if (excel !== 'excel_only') {
-    const q = new URLSearchParams({ page: Number(params.get('page')) || 1, size: 50 });
-    if (batch) q.set('batch', batch);
-    if (excel) q.set('excel', excel);
-    data = await api(`/api/records?${q}`);
-  }
+  const band = params.get('band') || '';
+  const q = new URLSearchParams({ page: Number(params.get('page')) || 1, size: 50 });
+  if (batch) q.set('batch', batch);
+  if (band) q.set('band', band);
+  const data = await api(`/api/baseline?${q}`);
+  const f = data.facets;
   const monthExcel = state.batches.find((b) => String(b.id) === String(batch));
+  const chips = checkChips('check-excel', params, 'band', [
+    ['full', '100%', f.full, 'ok'], ['high', '90–99%', f.high, 'ok'], ['medium', '70–89%', f.medium, 'warn'], ['low', 'Below 70%', f.low, 'bad'],
+    ['nopdf', 'Excel row · no PDF', f.nopdf, 'bad'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info']], null, f.excel_rows);
+  let table;
+  if (band === 'pdfonly') {
+    table = data.rows.length ? `<table>
+      <thead><tr><th>Month</th><th>VIN (PDF file name)</th><th>Customer (PDF)</th><th>Job number</th><th>Install date (PDF)</th><th></th></tr></thead>
+      <tbody>${data.rows.map((r, i) => `<tr class="clickable" data-vin="${esc(r.vin)}">
+        <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td><td class="mono">${esc(r.vin)}</td><td>${esc(r.customer_name)}</td>
+        <td class="mono">${esc(r.job_number)}</td><td class="num">${esc(fmtDate(r.install_date))}</td>
+        <td><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a></td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">Every PDF is in the Excel.</div>';
+  } else {
+    table = data.rows.length ? `<table class="baseline">
+      <thead>
+        <tr class="group"><th colspan="6">Excel (baseline)</th><th colspan="7">Found in PDF (Check 1 data)</th><th></th></tr>
+        <tr><th>Month</th><th>Row</th><th>VIN</th><th>Customer</th><th>Case no.</th><th>Install date</th>
+          <th title="VIN in PDF file name (15)">File</th><th title="VIN in PDF photo (15)">Photo</th><th title="VIN in paper box (10)">Paper</th>
+          <th title="Customer name similarity (25)">Name</th><th title="Case number = PDF job number (15)">Case</th><th title="Same date 20 · ≤3 days 10">Date</th>
+          <th>Match</th><th></th></tr></thead>
+      <tbody>${data.rows.map((x) => {
+        const r = x.record;
+        const pt = x.parts;
+        return `<tr class="${r ? 'clickable' : ''}" data-vin="${esc(r?.vin || '')}">
+          <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
+          <td class="num faint">${esc(x.row_no)}</td>
+          <td class="mono">${esc(x.vin)}</td>
+          <td>${esc(x.customer_name)}${r && pt.name < 95 ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.customer_name)}</div>` : ''}</td>
+          <td class="mono">${esc(x.case_number)}${r && !pt.case ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.job_number) || '–'}</div>` : ''}</td>
+          <td class="num">${esc(fmtDate(x.install_date))}${r && pt.date_days ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(fmtDate(r.install_date)) || '–'}</div>` : ''}</td>
+          ${r ? `<td>${tick(pt.vin_file, 15)}</td><td>${tick(pt.vin_photo, 15)}</td><td>${tick(pt.vin_paper, 10)}</td>
+            <td class="num ${pt.name >= 95 ? 'ok-mark' : pt.name >= 80 ? 'warn-mark' : 'bad-mark'}">${pt.name}%</td>
+            <td>${tick(pt.case, 15)}</td><td>${dateMark(pt.date_days)}</td>`
+            : '<td colspan="6"><span class="faint">No PDF with this VIN</span></td>'}
+          <td>${matchPct(x.score, x.band)}</td>
+          <td style="white-space:nowrap">${r ? `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a> · ` : ''}${x.excel_file_id ? `<a href="${excelUrl(x.excel_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Excel ${ICON.ext}</a>` : ''}</td>
+        </tr>`;
+      }).join('')}</tbody></table>` : '<div class="empty">Nothing here.</div>';
+  }
   view.innerHTML = `
     <div class="view-head"><div><h1><span class="tab-num big">2</span> Check Excel</h1>
-      <p>Is the VIN in the <b>file name</b> in the submission <b>Excel</b> (column H), and is the customer name the same (column D)? % = how similar the names are.</p></div>
+      <p>Each <b>Excel row</b> (row, VIN, customer, case number, install date) is the baseline. The app finds the PDF with the same VIN and checks every field. <b>% match</b> = VIN in file name 15 + photo 15 + paper 10 + name 25 + case number 15 + date 20.</p></div>
       <div class="row-actions">
         ${monthExcel?.reference_file_id ? `<a class="btn" href="${excelUrl(monthExcel.reference_file_id)}" target="_blank" rel="noopener">Open ${esc(fmtMonth(monthExcel.month))} Excel ${ICON.ext}</a>` : ''}
         <button class="btn" data-export="${esc(batch)}">${ICON.download} Export Excel</button></div></div>
     <div class="card">
       <div class="toolbar">
-        <div class="field"><label>Month</label><select class="select" id="ckBatch">${monthOptions(batch)}</select></div>
-        <div class="field grow"><label>Result</label>${checkChips('check-excel', params, 'excel', [
-          ['match', 'Match ≥95%', f.match, 'ok'], ['close', 'Close 80–94%', f.close, 'warn'], ['different', 'Different <80%', f.different, 'bad'],
-          ['missing', 'PDF not in Excel', f.missing, 'bad'], ['excel_only', 'Excel row with no PDF', excelOnly.length, 'info']], null, all.total)}</div>
+        <div class="field"><label>Month (Excel)</label><select class="select" id="ckBatch">${monthOptions(batch)}</select></div>
+        <div class="field grow"><label>% match</label>${chips}</div>
       </div>
-      ${excel === 'excel_only' ? `
-        <div class="legend"><span>Rows in the submission Excel whose VIN has no PDF in the folder.</span></div>
-        <div class="table-wrap">${excelOnly.length ? `<table>
-          <thead><tr><th>Month</th><th>VIN (Excel col H)</th><th>Customer (Excel col D)</th><th>Excel row</th><th>Install date (Excel)</th><th>Case number</th><th></th></tr></thead>
-          <tbody>${excelOnly.map((x) => `<tr>
-            <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
-            <td class="mono">${esc(x.vin)}</td><td>${esc(x.reference?.customer_name)}</td>
-            <td class="num">${esc(x.reference?.sheet_name || '')} ${esc(x.reference?.row_no || '')}</td>
-            <td class="num">${esc(fmtDate(x.reference?.install_date))}</td><td class="mono">${esc(x.reference?.case_number)}</td>
-            <td>${x.record ? `<span class="pill warn">PDF in ${esc(fmtMonth(x.record.month))}</span>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Every Excel row has a PDF.</div>'}</div>`
-      : `
-        <div class="legend"><span>${excelPill('match', 100, false)} VIN found, name matches</span><span>${excelPill('close', 90, false)} small spelling difference / partial name</span><span>${excelPill('different', 0, false)} different name</span><span>${excelPill('missing', 0, false)} VIN not in column H</span></div>
-        <div class="table-wrap">
-          ${data.records.length ? `<table>
-            <thead><tr><th>Month</th><th>VIN in file name</th><th>Result</th><th>Customer in PDF</th><th>Customer in Excel (col D)</th><th>Excel row</th><th>Date PDF / Excel</th><th></th></tr></thead>
-            <tbody>${data.records.map((r, i) => `
-              <tr class="clickable" data-i="${i}">
-                <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td>
-                <td class="mono">${esc(r.vin)}</td>
-                <td title="${esc(r.excel_reasons.join(' · '))}">${excelPill(r.excel_status, r.excel_conf)}</td>
-                <td class="${r.excel_status === 'different' ? 'bad-cell' : r.excel_status === 'close' ? 'warn-cell' : ''}">${esc(r.customer_name)}</td>
-                <td>${esc(r.ref_name) || '<span class="faint">–</span>'}</td>
-                <td class="num">${r.ref_row ? `${esc(r.ref_sheet_name)} · ${esc(r.ref_row)}` : '<span class="faint">–</span>'}</td>
-                <td><div class="stack"><span class="num">${esc(fmtDate(r.install_date)) || '–'}</span><small>${esc(fmtDate(r.ref_date)) || '–'}</small></div></td>
-                <td style="white-space:nowrap">
-                  <a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a>
-                  ${excelUrl(r.ref_file_id || r.month_ref_file_id) ? ` · <a href="${excelUrl(r.ref_file_id || r.month_ref_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Excel ${ICON.ext}</a>` : ''}</td>
-              </tr>`).join('')}</tbody></table>` : '<div class="empty">Nothing here.</div>'}
-        </div>
-        ${pager(data)}`}
+      <div class="table-wrap">${table}</div>
+      ${pager({ total: data.total, page: data.page, size: data.size })}
     </div>`;
-  wireCheckPage('check-excel', data);
+  wireCheckPage('check-excel', { ...data, records: [] });
+  $$('tbody tr[data-vin]').forEach((tr) => {
+    if (!tr.dataset.vin) return;
+    tr.onclick = async () => {
+      const { records } = await api(`/api/records?q=${encodeURIComponent(tr.dataset.vin)}&size=5`);
+      const rec = records.find((x) => x.vin === tr.dataset.vin) || records[0];
+      if (rec) openRecord(rec);
+    };
+  });
 }
 
 // ---------- Records ----------
@@ -647,14 +672,17 @@ function openRecord(r) {
           </div>
         </div>
         <div class="review-box">
-          <div class="review-head"><span>Excel check</span>${excelPill(r.excel_status, r.excel_conf)}</div>
-          <table class="vin-sources">
-            <tr><td>VIN</td><td class="mono">${esc(r.vin)}</td><td>${r.excel_status === 'missing' ? '<span class="bad-mark">not in Excel</span>' : `<span class="ok-mark">✔ row ${esc(r.ref_row || '?')}</span>`}</td></tr>
-            <tr><td>PDF name</td><td colspan="2">${esc(r.customer_name) || '–'}</td></tr>
-            <tr><td>Excel name</td><td colspan="2">${esc(r.ref_name) || '<span class="faint">–</span>'}</td></tr>
-          </table>
-          ${r.ref_sheet_name ? `<div class="faint" style="font-size:12px">Sheet “${esc(r.ref_sheet_name)}” · row ${esc(r.ref_row)} · column H (VIN) / D (name)</div>` : ''}
-          ${reasons(r.excel_reasons.slice(3).concat(r.excel_status === 'missing' ? r.excel_reasons : []))}
+          <div class="review-head"><span>② Check Excel</span>${matchPct(r.xl_score, r.xl_band)}</div>
+          ${r.xl_parts ? `<table class="vin-sources">
+            <tr><td>Excel row</td><td colspan="2">${r.ref_sheet_name ? `“${esc(r.ref_sheet_name)}” ` : ''}row ${esc(r.ref_row || '?')}</td></tr>
+            <tr><td>VIN (Excel)</td><td class="mono" colspan="2">${esc(r.vin)}</td></tr>
+            <tr><td>· file name</td><td class="mono">${esc(r.file_vin) || '–'}</td><td>${tick(r.xl_parts.vin_file, 15)}</td></tr>
+            <tr><td>· photo</td><td class="mono">${esc(r.vin_picture) || 'not read'}</td><td>${tick(r.xl_parts.vin_photo, 15)}</td></tr>
+            <tr><td>· paper box</td><td class="mono">${esc(r.paper_vin) || '–'}</td><td>${tick(r.xl_parts.vin_paper, 10)}</td></tr>
+            <tr><td>Name</td><td>${esc(r.ref_name) || '–'}${r.xl_parts.name < 95 ? `<div class="faint">PDF: ${esc(r.customer_name)}</div>` : ''}</td><td>${r.xl_parts.name}%</td></tr>
+            <tr><td>Case no.</td><td class="mono">${esc(r.ref_case) || '–'}${!r.xl_parts.case ? `<div class="faint">PDF: ${esc(r.job_number) || '–'}</div>` : ''}</td><td>${tick(r.xl_parts.case, 15)}</td></tr>
+            <tr><td>Date</td><td>${esc(fmtDate(r.ref_date)) || '–'}${r.xl_parts.date_days ? `<div class="faint">PDF: ${esc(fmtDate(r.install_date)) || '–'}</div>` : ''}</td><td>${dateMark(r.xl_parts.date_days)}</td></tr>
+          </table>` : `<div class="faint" style="font-size:12.5px">VIN ${esc(r.vin)} is not in the submission Excel.</div>`}
           <div class="row-actions">
             ${excelUrl(r.ref_file_id || r.month_ref_file_id) ? `<a class="btn sm" href="${excelUrl(r.ref_file_id || r.month_ref_file_id)}" target="_blank" rel="noopener">Open Excel ${ICON.ext}</a>` : ''}
             ${r.name_confirmed ? '' : `<button class="btn sm" data-confirm-name="${esc(r.vin)}">✔ Name is correct</button>`}

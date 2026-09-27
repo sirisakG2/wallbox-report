@@ -404,3 +404,9 @@ td.warn-cell { background: var(--warn-soft); color: var(--warn); }
 .chip-warn.active { border-color: var(--warn); background: var(--warn-soft); }
 .chip-bad.active { border-color: var(--bad); background: var(--bad-soft); }
 .chip-info.active { border-color: var(--info); background: var(--info-soft); }
+
+.cols-5 { grid-template-columns: repeat(5, 1fr); }
+table.baseline tr.group th { background: var(--surface-3); color: var(--text); text-align: center; border-bottom: 1px solid var(--border); padding: 6px; font-size: 11px; }
+table.baseline tr.group th:nth-child(2) { background: var(--accent-soft); }
+table.baseline thead tr:nth-child(2) th { top: 28px; }
+table.baseline td { padding: 9px 10px; }

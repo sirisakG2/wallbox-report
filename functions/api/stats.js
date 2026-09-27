@@ -1,5 +1,6 @@
 // GET /api/stats — dashboard totals across all months
 import { CONFIDENCE_COLUMNS, needsReview, withConfidence } from '../../lib/confidence.js';
+import { buildBaseline } from '../../lib/baseline.js';
 import { json } from '../../lib/server.js';
 
 export async function onRequestGet({ env }) {
@@ -22,5 +23,7 @@ export async function onRequestGet({ env }) {
   const vin_levels = { 1: 0, 2: 0, 3: 0 };
   const excel = { match: 0, close: 0, different: 0, missing: 0 };
   for (const r of scored) { vin_levels[r.vin_level]++; excel[r.excel_status]++; }
-  return json({ ...row, to_review, full_conf, vin_levels, excel, byInstallMonth: byMonth });
+  const base = await buildBaseline(env.DB);
+  const baseline = { ...base.facets, pdfonly: base.pdfOnly.length, excel_rows: base.rows.length };
+  return json({ ...row, to_review, full_conf, vin_levels, excel, baseline, byInstallMonth: byMonth });
 }

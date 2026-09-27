@@ -35,9 +35,8 @@ function addSheet(wb, name, columns, rows, style) {
 
 export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
   const q = batchId ? `batch=${batchId}&` : '';
-  const [{ records }, compare, { issues }, { batches }] = await Promise.all([
+  const [{ records }, { issues }, { batches }] = await Promise.all([
     api(`/api/records?${q}size=all`),
-    api(`/api/compare?${batchId ? `batch=${batchId}` : ''}`),
     api(`/api/issues?${q}`),
     api('/api/batches'),
   ]);
@@ -115,42 +114,46 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     ['serial_match', 'rec_serial', 'ref_serial'],
     ['name_match', 'rec_name', 'ref_name'],
   ];
-  addSheet(wb, 'Compare vs Reference', [
-    { header: 'VIN', key: 'vin', width: 21 },
-    { header: 'Status', key: 'status', width: 18 },
+  const base = await api(`/api/baseline?${batchId ? `batch=${batchId}&` : ''}size=all`);
+  const mark = (ok) => (ok ? '✔' : '✘');
+  addSheet(wb, 'Check 2 · Excel baseline', [
     { header: 'Month', key: 'month', width: 9 },
-    { header: 'Date ✔', key: 'date_match', width: 8 },
-    { header: 'Install date (PDF)', key: 'rec_date', width: 14, style: dateCol },
-    { header: 'Install date (Excel)', key: 'ref_date', width: 14, style: dateCol },
-    { header: 'Job ✔', key: 'job_match', width: 8 },
-    { header: 'Job number (PDF)', key: 'rec_job', width: 15 },
-    { header: 'Case number (Excel)', key: 'ref_case', width: 15 },
-    { header: 'Serial ✔', key: 'serial_match', width: 8 },
-    { header: 'Serial (PDF)', key: 'rec_serial', width: 13 },
-    { header: 'Serial (Excel)', key: 'ref_serial', width: 13 },
-    { header: 'Name ✔', key: 'name_match', width: 8 },
-    { header: 'Name (PDF)', key: 'rec_name', width: 30 },
-    { header: 'Name (Excel)', key: 'ref_name', width: 30 },
-    { header: 'Charger model (Excel)', key: 'ref_model', width: 20 },
-    { header: 'Car model (Excel)', key: 'ref_car', width: 16 },
-    { header: 'Team (Excel)', key: 'ref_team', width: 28 },
+    { header: 'Excel sheet', key: 'sheet_name', width: 16 },
+    { header: 'Excel row', key: 'row_no', width: 9 },
+    { header: 'VIN (Excel)', key: 'vin', width: 21 },
+    { header: 'Customer (Excel)', key: 'customer_name', width: 30 },
+    { header: 'Case no. (Excel)', key: 'case_number', width: 15 },
+    { header: 'Install date (Excel)', key: 'install_date', width: 14, style: dateCol },
+    { header: 'PDF found', key: 'found', width: 9 },
+    { header: 'VIN file (15)', key: 'vin_file', width: 10 },
+    { header: 'VIN photo (15)', key: 'vin_photo', width: 10 },
+    { header: 'VIN paper (10)', key: 'vin_paper', width: 10 },
+    { header: 'Name % (25)', key: 'name', width: 10 },
+    { header: 'Case (15)', key: 'case', width: 9 },
+    { header: 'Date (20)', key: 'date', width: 10 },
+    { header: '% match', key: 'score', width: 9 },
+    { header: 'Customer (PDF)', key: 'pdf_name', width: 30 },
+    { header: 'Job no. (PDF)', key: 'pdf_job', width: 15 },
+    { header: 'Install date (PDF)', key: 'pdf_date', width: 14, style: dateCol },
     { header: 'PDF link', key: 'pdf_link', width: 10 },
-  ], compare.rows.map((x) => ({
-    vin: x.vin,
-    status: x.status,
-    month: x.month,
-    date_match: flagText(x.date_match), rec_date: toDate(x.record?.install_date), ref_date: toDate(x.reference?.install_date),
-    job_match: flagText(x.job_match), rec_job: x.record?.job_number || '', ref_case: x.reference?.case_number || '',
-    serial_match: flagText(x.serial_match), rec_serial: x.record?.serial || '', ref_serial: x.reference?.serial || '',
-    name_match: flagText(x.name_match), rec_name: x.record?.customer_name || '', ref_name: x.reference?.customer_name || '',
-    ref_model: x.reference?.charger_model || '', ref_car: x.reference?.car_model || '', ref_team: x.reference?.team || '',
+  ], base.rows.map((x) => ({
+    month: x.month, sheet_name: x.sheet_name, row_no: x.row_no, vin: x.vin, customer_name: x.customer_name,
+    case_number: x.case_number, install_date: toDate(x.install_date),
+    found: x.record ? 'Yes' : 'No PDF',
+    vin_file: x.parts ? mark(x.parts.vin_file) : '', vin_photo: x.parts ? mark(x.parts.vin_photo) : '', vin_paper: x.parts ? mark(x.parts.vin_paper) : '',
+    name: x.parts ? x.parts.name / 100 : '', case: x.parts ? mark(x.parts.case) : '',
+    date: x.parts ? (x.parts.date_days === 0 ? '✔' : x.parts.date_days === null ? '' : `${x.parts.date_days} days`) : '',
+    score: x.score / 100,
+    pdf_name: x.record?.customer_name || '', pdf_job: x.record?.job_number || '', pdf_date: toDate(x.record?.install_date),
     pdf_link: driveLink(x.record?.pdf_file_id),
   })), (row, x) => {
-    if (x.status !== 'Both') row.getCell('status').fill = AMBER_FILL;
-    for (const [flag, a, b] of cmpCols) {
-      if (x[flag] === 0) for (const k of [flag, a, b]) row.getCell(k).fill = RED_FILL;
-      else if (x[flag] === 1) row.getCell(flag).fill = GREEN_FILL;
-    }
+    const sc = row.getCell('score');
+    sc.numFmt = '0%';
+    sc.fill = x.band === 'full' || x.band === 'high' ? GREEN_FILL : x.band === 'medium' ? AMBER_FILL : RED_FILL;
+    row.getCell('name').numFmt = '0%';
+    if (!x.record) row.getCell('found').fill = RED_FILL;
+    for (const k of ['vin_file', 'vin_photo', 'vin_paper', 'case']) if (x.parts && !x.parts[k]) row.getCell(k).fill = RED_FILL;
+    if (x.parts && x.parts.date_days !== 0) row.getCell('date').fill = AMBER_FILL;
   });
 
   addSheet(wb, 'Issues', [
@@ -182,14 +185,16 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     ['VIN ① Match 3/3 (file = photo = paper)', records.filter((r) => r.vin_level === 1).length],
     ['VIN ② File = Photo (paper differs)', records.filter((r) => r.vin_level === 2).length],
     ['VIN ③ Not matched (photo ≠ file name)', records.filter((r) => r.vin_level === 3).length],
-    ['Excel: name matches (≥95%)', records.filter((r) => r.excel_status === 'match').length],
-    ['Excel: close (80–94%)', records.filter((r) => r.excel_status === 'close').length],
-    ['Excel: different name (<80%)', records.filter((r) => r.excel_status === 'different').length],
-    ['Excel: VIN not in Excel', records.filter((r) => r.excel_status === 'missing').length],
+    ['Check 2 · Excel rows', base.rows.length],
+    ['Check 2 · 100% match', base.facets.full],
+    ['Check 2 · 90–99%', base.facets.high],
+    ['Check 2 · 70–89%', base.facets.medium],
+    ['Check 2 · below 70%', base.facets.low],
+    ['Check 2 · Excel row with no PDF', base.facets.nopdf],
+    ['Check 2 · PDF not in Excel', base.pdfOnly ? base.pdfOnly.length : base.facets.pdfonly],
     ['VIN photo ✔ match', records.filter((r) => r.vin_photo_match === 1).length],
     ['VIN photo ✘ mismatch', records.filter((r) => r.vin_photo_match === 0).length],
     ['VIN photo not read', records.filter((r) => r.vin_photo_match == null).length],
-    ...Object.entries(compare.summary).map(([k, v]) => [`Compare: ${k.replace(/_match_fail$/, ' mismatches').replace(/_/g, ' ')}`, v]),
     ['Open issues', issues.filter((i) => !i.resolved).length],
   ];
   for (const l of lines) {
