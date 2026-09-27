@@ -35,10 +35,12 @@ export async function onRequestGet({ params, env }) {
 
   const { results: recs } = await env.DB.prepare(`SELECT r.*, ${CONFIDENCE_COLUMNS} FROM records r WHERE r.batch_id = ?`).bind(id).all();
   const levels = { 1: 0, 2: 0, 3: 0 };
-  for (const r of recs) levels[withConfidence(r).vin_level]++;
+  const excel = { match: 0, close: 0, different: 0, missing: 0 };
+  for (const r of recs) { const x = withConfidence(r); levels[x.vin_level]++; excel[x.excel_status]++; }
   return json({
     batch,
-    counts: { ...row, unread_other: row.unread_all - row.unread_quota, vin_l1: levels[1], vin_l2: levels[2], vin_l3: levels[3] },
+    counts: { ...row, unread_other: row.unread_all - row.unread_quota, vin_l1: levels[1], vin_l2: levels[2], vin_l3: levels[3],
+      xl_match: excel.match, xl_close: excel.close, xl_diff: excel.different, xl_missing: excel.missing },
     quotaReached: row.quota_hits > 0,
   });
 }

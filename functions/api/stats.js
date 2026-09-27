@@ -20,6 +20,7 @@ export async function onRequestGet({ env }) {
   const to_review = scored.filter(needsReview).length;
   const full_conf = scored.filter((r) => r.vin_level === 1 && r.date_conf === 100).length;
   const vin_levels = { 1: 0, 2: 0, 3: 0 };
-  for (const r of scored) vin_levels[r.vin_level]++;
-  return json({ ...row, to_review, full_conf, vin_levels, byInstallMonth: byMonth });
+  const excel = { match: 0, close: 0, different: 0, missing: 0 };
+  for (const r of scored) { vin_levels[r.vin_level]++; excel[r.excel_status]++; }
+  return json({ ...row, to_review, full_conf, vin_levels, excel, byInstallMonth: byMonth });
 }

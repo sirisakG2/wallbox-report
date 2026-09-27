@@ -2,6 +2,7 @@
 // list → reference xlsx → for each PDF: download → MuPDF page-1 parse (worker) → Workers AI OCR → save to D1.
 import { api } from './api.js';
 import { freeOcrStatus, freeReadVin } from './free-ocr.js';
+import { looksGarbled } from './names.js';
 import { parseReference } from './reference.js';
 import { cleanThai, nameFromFileName, normalizeVin, parseAnyDate, VIN_RE, vinFromFileName } from './parse.js';
 
@@ -245,6 +246,10 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   const fileName = nameFromFileName(file.name);
   if (parsed.scanned && fileName) {
     if (customer && customer !== fileName) notes.push(`AI read name as "${customer}"`);
+    customer = fileName;
+  }
+  if (customer && fileName && looksGarbled(customer)) {
+    notes.push(`PDF name unreadable ("${customer.slice(0, 40)}") — name taken from file name`);
     customer = fileName;
   }
   customer = customer || fileName;

@@ -185,6 +185,8 @@ export function parseLines(lines, images) {
     const u = l.text.match(/https?:\/\/ev\.rpdservice\.com\/\S+/);
     if (u) out.job_url = u[0];
   }
+  // A tall name cell can pull in the phone number from the row below.
+  if (out.customer_name) out.customer_name = out.customer_name.replace(/\s+0\d[\d\s-]{4,}$/, '').trim();
   out.install_date = parseAnyDate(out.install_date_raw);
   out.vin = normalizeVin(out.vin);
   out.serial = String(out.serial || '').replace(/\s+/g, '');
@@ -250,6 +252,10 @@ export function extractPage1(mupdf, bytes, maxSide = 1400) {
       return { fields: {}, vinJpeg: null, pageJpeg: pagePix.asJPEG(80, false), scanned: true, pageCount };
     };
     if (cleanLines.length < 5) return scannedPage();
+    // A Thai form whose text layer has almost no Thai letters is a scan with a junk OCR layer.
+    const allText = cleanLines.map((l) => l.text).join('');
+    const thai = (allText.match(/[\u0E01-\u0E4E]/g) || []).length;
+    if (thai < 0.15 * (allText.match(/[\u0E01-\u0E4EA-Za-z]/g) || []).length) return scannedPage();
     const fields = parseLines(cleanLines, images);
     // XPENG VINs are made in China, so they start with "L" (world manufacturer code L1N).
     const trustworthy = /XPENG\s*\d{5,}/i.test(fields.job_number || '') || (VIN_RE.test(fields.vin || '') && /^L/.test(fields.vin));

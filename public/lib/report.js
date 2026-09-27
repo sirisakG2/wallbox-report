@@ -52,6 +52,9 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     { header: 'VIN check', key: 'vin_level_label', width: 15 },
     { header: 'Photo VIN', key: 'vin_picture', width: 21 },
     { header: 'Paper VIN', key: 'paper_vin', width: 21 },
+    { header: 'Excel check', key: 'excel_text', width: 14 },
+    { header: 'Name match %', key: 'excel_pct', width: 10 },
+    { header: 'Excel name (col D)', key: 'ref_name', width: 30 },
     { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
     { header: 'Date %', key: 'date_conf_pct', width: 8 },
     { header: 'Needs review', key: 'needs_review', width: 11 },
@@ -75,8 +78,10 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     { header: 'Notes', key: 'notes', width: 40 },
   ], records.map((r) => ({
     vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
+    excel_text: r.excel_label,
+    excel_pct: r.excel_status === 'missing' ? '' : r.excel_conf / 100,
     date_conf_pct: r.date_conf / 100,
-    needs_review: r.vin_level === 3 || r.date_conf < 95 ? 'Yes' : '',
+    needs_review: r.vin_level === 3 || r.excel_conf < 80 || r.date_conf < 95 ? 'Yes' : '',
     vin_why: r.vin_conf_reasons.join('; '),
     file_status_text: r.file_status ? `${r.file_status === 'updated' ? 'Updated' : 'Deleted'} ${String(r.file_status_at).slice(0, 10)}` : '',
     date_why: r.date_conf_reasons.join('; '),
@@ -86,13 +91,16 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     job_url: urlLink(r.job_url),
     pdf_link: driveLink(r.pdf_file_id),
   })), (row, r) => {
+    const xl = row.getCell('excel_text');
+    xl.fill = r.excel_status === 'match' ? GREEN_FILL : r.excel_status === 'close' ? AMBER_FILL : RED_FILL;
+    row.getCell('excel_pct').numFmt = '0%';
     const dc = row.getCell('date_conf_pct');
     dc.numFmt = '0%';
     dc.fill = r.date_conf >= 95 ? GREEN_FILL : r.date_conf >= 80 ? AMBER_FILL : RED_FILL;
     row.getCell('vin_level_label').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
     if (r.vin_picture && r.vin_picture !== r.file_vin) row.getCell('vin_picture').fill = RED_FILL;
     if (r.paper_vin !== r.file_vin) row.getCell('paper_vin').fill = AMBER_FILL;
-    if (r.vin_level === 3 || r.date_conf < 95) row.getCell('needs_review').fill = AMBER_FILL;
+    if (r.vin_level === 3 || r.excel_conf < 80 || r.date_conf < 95) row.getCell('needs_review').fill = AMBER_FILL;
     if (r.file_status === 'deleted') row.getCell('file_status_text').fill = RED_FILL;
     if (r.file_status === 'updated') row.getCell('file_status_text').fill = AMBER_FILL;
     const c = row.getCell('match');
@@ -174,6 +182,10 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     ['VIN ① Match 3/3 (file = photo = paper)', records.filter((r) => r.vin_level === 1).length],
     ['VIN ② File = Photo (paper differs)', records.filter((r) => r.vin_level === 2).length],
     ['VIN ③ Not matched (photo ≠ file name)', records.filter((r) => r.vin_level === 3).length],
+    ['Excel: name matches (≥95%)', records.filter((r) => r.excel_status === 'match').length],
+    ['Excel: close (80–94%)', records.filter((r) => r.excel_status === 'close').length],
+    ['Excel: different name (<80%)', records.filter((r) => r.excel_status === 'different').length],
+    ['Excel: VIN not in Excel', records.filter((r) => r.excel_status === 'missing').length],
     ['VIN photo ✔ match', records.filter((r) => r.vin_photo_match === 1).length],
     ['VIN photo ✘ mismatch', records.filter((r) => r.vin_photo_match === 0).length],
     ['VIN photo not read', records.filter((r) => r.vin_photo_match == null).length],

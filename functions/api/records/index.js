@@ -1,4 +1,4 @@
-// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&vinlevel=(1|2|3)&fstatus=(updated|deleted)&page=1&size=50   (size=all for export)
+// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&vinlevel=(1|2|3)&excel=(match|close|different|missing)&fstatus=(updated|deleted)&page=1&size=50   (size=all for export)
 // Every record carries vin_conf / date_conf (0–100) with reasons. conf=review lists records below
 // 95 % (lowest first) so an admin can open the PDF and confirm or correct them.
 import { CONFIDENCE_COLUMNS, needsReview, withConfidence } from '../../../lib/confidence.js';
@@ -36,6 +36,8 @@ export async function onRequestGet({ request, env }) {
   } else if (conf === 'full') {
     rows = rows.filter((r) => r.vin_level === 1 && r.date_conf === 100);
   }
+  const excel = p.get('excel');
+  if (['match', 'close', 'different', 'missing'].includes(excel)) rows = rows.filter((r) => r.excel_status === excel);
   const level = Number(p.get('vinlevel'));
   if (level >= 1 && level <= 3) rows = rows.filter((r) => r.vin_level === level);
 

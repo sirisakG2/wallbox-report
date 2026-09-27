@@ -43,6 +43,11 @@ function vinLevelPill(level) {
   const [tone, label] = LEVEL[level] || ['neutral', '–'];
   return `<span class="pill ${tone} plain lvl">${label}</span>`;
 }
+const XL = { match: ['ok', 'Match'], close: ['warn', 'Close'], different: ['bad', 'Different'], missing: ['bad', 'Not in Excel'] };
+function excelPill(status, score, withPct = true) {
+  const [tone, label] = XL[status] || ['neutral', '–'];
+  return `<span class="pill ${tone} plain lvl">${label}${withPct && status !== 'missing' ? ` ${score}%` : ''}</span>`;
+}
 function fileStatusPill(r) {
   if (r.file_status === 'updated') return `<span class="pill info" title="PDF changed in Drive and was read again">Updated ${esc(fmtDate(r.file_status_at))}</span>`;
   if (r.file_status === 'deleted') return `<span class="pill bad" title="PDF is no longer in the Drive folder — record kept">Deleted ${esc(fmtDate(r.file_status_at))}</span>`;
@@ -140,6 +145,20 @@ async function renderDashboard() {
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><h2>Excel check — file name VIN found in Excel column H · customer name vs column D</h2><span class="faint">confidence % = name similarity</span></div>
+      <div class="grid cols-4 card-pad">
+        ${[['match', 'Name matches (≥95%)'], ['close', 'Small spelling difference or partial name (80–94%)'], ['different', 'Different name (<80%)'], ['missing', 'VIN not in the submission Excel']].map(([k, desc]) => {
+          const n = s.excel[k];
+          const tone = XL[k][0];
+          return `<a class="card kpi kpi-link level-card ${tone}" href="#/records?excel=${k}" style="box-shadow:none;background:var(--surface-2)">
+            <div class="label">${XL[k][1]}</div>
+            <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.records)}%</span></div>
+            <div class="meter"><i style="width:${pct(n, s.records)}%"></i></div>
+            <div class="sub" style="margin-top:8px">${desc}</div></a>`;
+        }).join('')}
+      </div>
+    </div>
     <div class="grid cols-4">
       <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
       <a class="card kpi kpi-link" href="#/records?conf=review"><div class="label">To review</div><div class="value" style="color:${s.to_review ? 'var(--warn)' : 'inherit'}">${fmtN(s.to_review)}</div><div class="sub">VIN or date below 95% · ${fmtN(s.full_conf)} at 100%</div></a>
@@ -403,7 +422,7 @@ function changesPanel(plan) {
 async function renderRecords(params) {
   const page = Number(params.get('page')) || 1;
   const q = new URLSearchParams({ page, size: 50 });
-  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus', 'vinlevel']) if (params.get(k)) q.set(k, params.get(k));
+  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus', 'vinlevel', 'excel']) if (params.get(k)) q.set(k, params.get(k));
   const data = await api(`/api/records?${q}`);
   state.lastRecords = data.records;
   state.reviewMode = params.get('conf') === 'review';
@@ -422,6 +441,9 @@ async function renderRecords(params) {
         <div class="field"><label>PDF file</label><select class="select" name="fstatus">
           ${[['', 'All'], ['updated', 'Updated'], ['deleted', 'Deleted']].map(([v, l]) => `<option value="${v}" ${(params.get('fstatus') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
+        <div class="field"><label>Excel check</label><select class="select" name="excel">
+          ${[['', 'All'], ['match', 'Match'], ['close', 'Close'], ['different', 'Different'], ['missing', 'Not in Excel']].map(([v, l]) => `<option value="${v}" ${(params.get('excel') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></div>
         <div class="field"><label>VIN check</label><select class="select" name="vinlevel">
           ${[['', 'All'], ['1', '① Match 3/3'], ['2', '② File = Photo'], ['3', '③ Not matched']].map(([v, l]) => `<option value="${v}" ${(params.get('vinlevel') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
@@ -432,7 +454,7 @@ async function renderRecords(params) {
       </form>
       <div class="table-wrap">
         ${data.records.length ? `<table>
-          <thead><tr><th title="VIN from the file name (reference)">VIN (file name)</th><th>VIN check</th><th>Photo VIN</th><th>Paper VIN</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>Job number</th><th>Customer</th><th>Serial</th><th>Month</th><th></th></tr></thead>
+          <thead><tr><th title="VIN from the file name (reference)">VIN (file name)</th><th>VIN check</th><th>Photo VIN</th><th>Paper VIN</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>Job number</th><th>Customer</th><th title="VIN found in Excel column H, name vs column D">Excel</th><th>Serial</th><th>Month</th><th></th></tr></thead>
           <tbody>${data.records.map((r, i) => `
             <tr class="clickable" data-i="${i}">
               <td class="mono">${esc(r.file_vin || r.vin)}</td>
@@ -443,6 +465,7 @@ async function renderRecords(params) {
               <td title="${esc(r.date_conf_reasons.join(' · '))}">${confPill(r.date_conf)}</td>
               <td class="mono">${esc(r.job_number)}</td>
               <td>${esc(r.customer_name)}</td>
+              <td title="${esc(r.excel_reasons.join(' · '))}">${excelPill(r.excel_status, r.excel_conf)}</td>
               <td class="mono">${esc(r.serial)}</td>
               <td class="faint">${esc(fmtMonth(r.month))}</td>
               <td style="white-space:nowrap">${r.file_status === 'deleted' ? '' : `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a> `}${fileStatusPill(r)}</td>
@@ -462,6 +485,7 @@ async function renderRecords(params) {
   f.onsubmit = (e) => { e.preventDefault(); go('records', current()); };
   f.batch.onchange = () => go('records', current());
   f.vinlevel.onchange = () => go('records', current());
+  f.excel.onchange = () => go('records', current());
   f.conf.onchange = () => go('records', current());
   f.fstatus.onchange = () => go('records', current());
   $('#clearF').onclick = () => go('records');
@@ -489,6 +513,15 @@ function openRecord(r) {
             ${r.vin_confirmed || !r.file_vin ? '' : `<button class="btn sm" data-confirm-vin="${esc(r.vin)}" title="I checked the photo in the PDF: it shows the file name VIN">✔ Photo shows this VIN</button>`}
             <button class="btn sm" data-correct-vin="${esc(r.vin)}">Correct VIN</button>
           </div>
+        </div>
+        <div class="review-box">
+          <div class="review-head"><span>Excel check</span>${excelPill(r.excel_status, r.excel_conf)}</div>
+          <table class="vin-sources">
+            <tr><td>VIN</td><td class="mono">${esc(r.vin)}</td><td>${r.excel_status === 'missing' ? '<span class="bad-mark">not in Excel</span>' : '<span class="ok-mark">✔ col H</span>'}</td></tr>
+            <tr><td>PDF name</td><td colspan="2">${esc(r.customer_name) || '–'}</td></tr>
+            <tr><td>Excel name</td><td colspan="2">${esc(r.ref_name) || '<span class="faint">–</span>'}</td></tr>
+          </table>
+          ${reasons(r.excel_reasons.slice(3).concat(r.excel_status === 'missing' ? r.excel_reasons : []))}
         </div>
         <div class="review-box">
           <div class="review-head"><span>Installation date</span>${confPill(r.date_conf, true)}</div>
@@ -578,6 +611,11 @@ async function openSummary(batchId) {
           </tr>`).join('')}</tbody>
       </table>
       <div class="kv" style="border:0;margin-top:10px"><dt>Other checks</dt><dd class="muted">${fmtN(c.missing_vin)} VIN taken from file name · ${fmtN(c.bad_date)} unreadable dates · ${fmtN(c.charger_photo)} charger photo in VIN slot</dd></div>
+      <div class="kv" style="border:0"><dt>Excel check</dt><dd>
+        <a href="#/records?batch=${b}&excel=match" data-close-summary>${excelPill('match', 0, false)} ${fmtN(c.xl_match)}</a> &nbsp;
+        <a href="#/records?batch=${b}&excel=close" data-close-summary>${excelPill('close', 0, false)} ${fmtN(c.xl_close)}</a> &nbsp;
+        <a href="#/records?batch=${b}&excel=different" data-close-summary>${excelPill('different', 0, false)} ${fmtN(c.xl_diff)}</a> &nbsp;
+        <a href="#/records?batch=${b}&excel=missing" data-close-summary>${excelPill('missing', 0, false)} ${fmtN(c.xl_missing)}</a></dd></div>
       <div class="kv" style="border:0"><dt>PDF files</dt><dd>
         <a href="#/records?batch=${b}&fstatus=updated" data-close-summary><span class="pill info plain">Updated ${fmtN(c.updated_files)}</span></a>
         <a href="#/records?batch=${b}&fstatus=deleted" data-close-summary><span class="pill bad plain">Deleted ${fmtN(c.deleted_files)}</span></a></dd></div>
@@ -639,7 +677,7 @@ async function renderCompare(params) {
               <td>${flagCell(x.date_match)}</td>${cell(x.date_match, fmtDate(x.record?.install_date), fmtDate(x.reference?.install_date))}
               <td>${flagCell(x.job_match)}</td>${cell(x.job_match, x.record?.job_number, x.reference?.case_number, true)}
               <td>${flagCell(x.serial_match)}</td>${cell(x.serial_match, x.record?.serial, x.reference?.serial, true)}
-              <td>${flagCell(x.name_match)}</td>${cell(x.name_match, x.record?.customer_name, x.reference?.customer_name)}
+              <td>${flagCell(x.name_match)}${x.name_score != null && x.name_match === 0 ? `<div class="faint" style="font-size:11px">${x.name_score}%</div>` : ''}</td>${cell(x.name_match, x.record?.customer_name, x.reference?.customer_name)}
               <td class="faint">${esc(fmtMonth(x.month))}</td>
             </tr>`).join('')}</tbody></table>` : '<div class="empty">Nothing to show.</div>'}
       </div>
