@@ -10,6 +10,8 @@ export function normName(s) {
   let n = String(s || '').normalize('NFC').replace(/ํา/g, 'ำ').replace(/[​-‍﻿�]/g, '')
     .trim().toLowerCase();
   for (let i = 0; i < 2; i++) n = n.replace(TITLES, '');
+  // Company abbreviations: บ. = บริษัท, หจก. = ห้างหุ้นส่วนจำกัด, จก. = จำกัด
+  n = n.replace(/(^|\s|\/)บ\.\s*/g, '$1บริษัท').replace(/ห้างหุ้นส่วนจำกัด/g, 'หจก.').replace(/(\s|^)จก\.?$/g, '$1จำกัด');
   return n.replace(/[\s().,_\-'"]/g, '');
 }
 
