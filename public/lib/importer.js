@@ -329,7 +329,7 @@ export async function planFolder(pdfs, stored) {
 // Runs a whole import. `ui` receives progress callbacks.
 export async function runImport({ folder, month, plan = null, reprocess = false, retry = false, ocr: useOcr = true, limit = 0, concurrency = 5 }, ui, signal) {
   const pdfs = folder.files.filter((f) => f.type === 'pdf');
-  const refFile = folder.files.find((f) => f.type === 'xlsx');
+  const refFile = folder.refFile !== undefined ? folder.refFile : folder.files.find((f) => f.type === 'xlsx');
 
   const { batch, doneFileIds, retryFileIds } = await api('/api/batches', {
     method: 'POST',

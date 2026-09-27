@@ -120,14 +120,14 @@ function go(name, params = {}) {
 }
 
 const VIEWS = {
-  dashboard: renderDashboard, import: renderImport, 'check-pdf': renderCheckPdf, 'check-excel': renderCheckExcel,
-  records: renderRecords, compare: renderCompare, issues: renderIssues, months: renderMonths, export: renderExport,
+  dashboard: renderDashboard, import: renderMonthsImport, 'check-pdf': renderCheckPdf, 'check-excel': renderCheckExcel,
+  records: renderRecords, compare: renderCompare, issues: renderIssues, months: renderMonthsImport, export: renderExport,
 };
 
 async function route() {
   const { name, params } = parseHash();
   const fn = VIEWS[name] || renderDashboard;
-  const tabName = name === 'compare' ? 'check-excel' : VIEWS[name] ? name : 'dashboard';
+  const tabName = name === 'compare' ? 'check-excel' : name === 'import' ? 'months' : VIEWS[name] ? name : 'dashboard';
   $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === tabName));
   // A running import keeps going when switching tabs; renderImport re-attaches its view.
   $$('.drawer, .drawer-backdrop').forEach((x) => x.remove());
@@ -189,7 +189,7 @@ async function renderDashboard() {
 
     <div class="grid cols-2 section-gap">
       <div class="card">
-        <div class="card-head"><h2>Imported months</h2><button class="btn sm" data-go="months">Manage</button></div>
+        <div class="card-head"><h2>Imported months</h2><button class="btn sm" data-go="months">Months &amp; Import</button></div>
         <div class="card-pad">
           ${b.length ? `<div class="months">${b.map(monthCard).join('')}</div>` : `<div class="empty">No months imported yet.<br><br><button class="btn primary" data-go="import">Import the first month</button></div>`}
         </div>
@@ -238,11 +238,11 @@ function monthCard(b) {
 }
 
 // ---------- Import ----------
-function renderImport(params) {
-  if (state.importing) { view.replaceChildren(state.importing.el); return; }
+function renderImport(params, box = view) {
+  if (state.importing) { box.replaceChildren(state.importing.el); return; }
   const el = document.createElement('div');
   el.innerHTML = `
-    <div class="view-head"><div><h1>Import month</h1><p>Paste the Google Drive folder of one month. Every PDF becomes one record (VIN = key); the Excel in the folder is kept as reference.</p></div></div>
+    <div class="view-head"><div><h1>Months &amp; Import</h1><p>Import a month: paste the Google Drive folder of one month — every PDF becomes one record (VIN = key) and the Excel in the folder is the reference. Imported months are listed below.</p></div></div>
     <div class="card import-hero">
       <div class="import-row">
         <div class="field"><label for="folderUrl">Google Drive folder URL</label>
@@ -288,7 +288,7 @@ function renderImport(params) {
       <div class="log" id="log"></div>
       <div class="row-actions" style="margin-top:14px" id="doneActions" hidden></div>
     </div>`;
-  view.replaceChildren(el);
+  box.replaceChildren(el);
 
   let folder = null;
   const urlInput = $('#folderUrl', el);
@@ -302,13 +302,17 @@ function renderImport(params) {
       const r = await api(`/api/drive/list?folder=${encodeURIComponent(url)}`);
       folder = { ...r, url };
       const pdfs = r.files.filter((f) => f.type === 'pdf');
-      const ref = r.files.find((f) => f.type === 'xlsx');
+      const existing = state.batches.find((b) => b.folder_id === r.folderId);
+      // Reference Excel: keep the one this month was imported with; otherwise the first one found.
+      const xlsxFiles = r.files.filter((f) => f.type === 'xlsx');
+      const ref = xlsxFiles.find((f) => existing && f.id === existing.reference_file_id)
+        || xlsxFiles.find((f) => existing && f.name === existing.reference_name) || xlsxFiles[0];
+      folder.refFile = ref || null;
       $('#fTitle', el).textContent = r.title || r.folderId;
       $('#fTitle', el).title = r.title;
       $('#fPdfs', el).textContent = fmtN(pdfs.length);
-      $('#fRef', el).textContent = ref ? ref.name : 'None found';
-      $('#fRef', el).title = ref?.name || '';
-      const existing = state.batches.find((b) => b.folder_id === r.folderId);
+      $('#fRef', el).innerHTML = ref ? `${esc(ref.name)}${xlsxFiles.length > 1 ? `<div class="warn-note">${xlsxFiles.length} Excel files in this folder — using ${existing && (ref.id === existing.reference_file_id || ref.name === existing.reference_name) ? 'the one imported before' : 'the first one'}</div>` : ''}` : 'None found';
+      $('#fRef', el).title = xlsxFiles.map((f) => f.name).join('\n');
       $('#fMonth', el).value = existing?.month || suggestMonth(r.title);
       const ex = $('#fExisting', el);
       ex.hidden = !existing;
@@ -411,7 +415,7 @@ function renderImport(params) {
       $('#stopBtn', el).hidden = true;
       $('#checkBtn', el).disabled = false;
       urlInput.disabled = false;
-      loadBatches().catch(() => {});
+      loadBatches().then(() => { const z = $('#monthsZone'); if (z) renderMonths(parseHash().params, z); }).catch(() => {});
     }
   };
   $('#stopBtn', el).onclick = () => {
@@ -575,6 +579,13 @@ async function renderCheckExcel(params) {
       if (rec) openRecord(rec);
     };
   });
+}
+
+// ---------- Months & Import (one page) ----------
+async function renderMonthsImport(params) {
+  view.innerHTML = '<div id="impZone"></div><div id="monthsZone" class="section-gap"></div>';
+  renderImport(params, $('#impZone'));
+  await renderMonths(params, $('#monthsZone'));
 }
 
 // ---------- Records ----------
@@ -1003,11 +1014,10 @@ async function renderIssues(params) {
 }
 
 // ---------- Months ----------
-async function renderMonths() {
+async function renderMonths(params, box = view) {
   const b = state.batches;
-  view.innerHTML = `
-    <div class="view-head"><div><h1>Months</h1><p>Every imported Drive folder. New URLs add a new month; all data is kept.</p></div>
-      <button class="btn primary" data-go="import">${ICON.play} Import a month</button></div>
+  box.innerHTML = `
+    <div class="section-title"><h2>Imported months</h2><span class="faint">Every imported Drive folder — a new URL adds a new month; all data is kept.</span></div>
     <div class="card">
       <div class="table-wrap">
         ${b.length ? `<table>
