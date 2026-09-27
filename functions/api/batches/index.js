@@ -1,6 +1,5 @@
 // GET  /api/batches  → all months with counts
 // POST /api/batches  → create or reopen (same folder) a month batch; returns processed file ids for resume
-import { excelProblems } from '../../../lib/excel-problems.js';
 import { OTHER_PROBLEMS_SQL, bad, folderIdFromUrl, json } from '../../../lib/server.js';
 
 export async function onRequestGet({ request, env }) {
@@ -28,9 +27,19 @@ export async function onRequestGet({ request, env }) {
       (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.file_status = 'deleted') AS deleted_count,
       (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.file_status = 'updated') AS updated_count
     FROM batches b ORDER BY b.month DESC, b.id DESC`).all();
-  const xp = await excelProblems(env.DB);
-  for (const b of results) b.excel_problem_count = xp.filter((x) => x.batch_id === b.id).length;
-  return json({ batches: results, excel_problems: xp.length });
+  // Excel-side problems, counted in SQL only (this endpoint runs on every page — keep it cheap):
+  // Excel rows with an invalid VIN + PDFs whose VIN is only in another month's Excel.
+  const { results: xp } = await env.DB.prepare(`
+    SELECT batch_id, COUNT(*) AS n FROM (
+      SELECT f.batch_id FROM reference_rows f WHERE f.sheet = 'install_invalid'
+      UNION ALL
+      SELECT r.batch_id FROM records r
+      WHERE NOT EXISTS (SELECT 1 FROM reference_rows g WHERE g.vin = r.vin AND g.batch_id = r.batch_id AND g.sheet = 'install')
+        AND EXISTS (SELECT 1 FROM reference_rows g WHERE g.vin = r.vin AND g.batch_id != r.batch_id AND g.sheet = 'install')
+    ) GROUP BY batch_id`).all();
+  const xpBy = new Map(xp.map((x) => [x.batch_id, x.n]));
+  for (const b of results) b.excel_problem_count = xpBy.get(b.id) || 0;
+  return json({ batches: results, excel_problems: xp.reduce((a, x) => a + x.n, 0) });
 }
 
 export async function onRequestPost({ request, env }) {
