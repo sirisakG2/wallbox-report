@@ -87,6 +87,7 @@ const ISSUE_LABEL = {
   scanned_page: ['Scanned page', 'info'], error: ['Error', 'bad'], vin_photo_wrong: ['Charger photo in VIN slot', 'warn'],
   edited_pdf: ['PDF may be edited', 'bad'], suspicious_date: ['Suspicious date', 'warn'], file_updated: ['PDF updated in Drive', 'info'],
 };
+const OTHER_TYPES = ['edited_pdf', 'duplicate_vin', 'scanned_page', 'vin_photo_wrong', 'error', 'file_updated'];
 const issuePill = (t) => { const [l, c] = ISSUE_LABEL[t] || [t, 'neutral']; return `<span class="pill ${c}">${esc(l)}</span>`; };
 
 // ---------- state & routing ----------
@@ -182,7 +183,7 @@ async function renderDashboard() {
       <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
       <a class="card kpi kpi-link" href="#/records?conf=review"><div class="label">To review</div><div class="value" style="color:${s.to_review ? 'var(--warn)' : 'inherit'}">${fmtN(s.to_review)}</div><div class="sub">VIN or date below 95% · ${fmtN(s.full_conf)} at 100%</div></a>
       <div class="card kpi"><div class="label">In reference Excel</div><div class="value">${pct(s.matched, s.reference_rows)}%</div><div class="sub">${fmtN(s.matched)} of ${fmtN(s.reference_rows)} rows have a PDF</div></div>
-      <div class="card kpi"><div class="label">Open issues</div><div class="value" style="color:${s.open_issues ? 'var(--warn)' : 'inherit'}">${fmtN(s.open_issues)}</div><div class="sub">need a look</div></div>
+      <a class="card kpi kpi-link" href="#/issues"><div class="label">Other problems</div><div class="value" style="color:${s.open_issues ? 'var(--warn)' : 'inherit'}">${fmtN(s.open_issues)}</div><div class="sub">edited PDF, duplicates, scans…</div></a>
     </div>
 
     <div class="grid cols-2 section-gap">
@@ -218,7 +219,7 @@ function monthCard(b) {
         <div class="stat"><b>${fmtN(b.record_count)}</b><span>Records</span></div>
         <div class="stat"><b>${fmtN(b.pdf_count)}</b><span>PDFs</span></div>
         <div class="stat"><b style="color:${b.ocr_mismatch_count ? 'var(--bad)' : 'inherit'}">${fmtN(b.ocr_mismatch_count)}</b><span>VIN ✘</span></div>
-        <div class="stat"><b style="color:${b.open_issue_count ? 'var(--warn)' : 'inherit'}">${fmtN(b.open_issue_count)}</b><span>Issues</span></div>
+        <div class="stat"><b style="color:${b.open_issue_count ? 'var(--warn)' : 'inherit'}">${fmtN(b.open_issue_count)}</b><span>Problems</span></div>
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-3);margin-bottom:6px"><span>Processed ${fmtN(b.processed_count)} / ${fmtN(b.pdf_count)}${b.updated_count ? ` · <span style="color:var(--info)">${fmtN(b.updated_count)} updated</span>` : ''}${b.deleted_count ? ` · <span style="color:var(--bad)">${fmtN(b.deleted_count)} deleted</span>` : ''}</span><span>Reference match ${b.reference_count ? pct(b.matched_count, b.reference_count) : 0}%</span></div>
@@ -226,10 +227,10 @@ function monthCard(b) {
       </div>
       <div class="row-actions">
         <button class="btn sm primary" data-summary="${b.id}">Summary</button>
-        <button class="btn sm" data-go="records" data-batch="${b.id}">Records</button>
+        <button class="btn sm" data-go="records" data-batch="${b.id}">All PDFs</button>
         <button class="btn sm" data-go="check-pdf" data-batch="${b.id}">Check PDF</button>
         <button class="btn sm" data-go="check-excel" data-batch="${b.id}">Check Excel</button>
-        <button class="btn sm" data-go="issues" data-batch="${b.id}">Issues</button>
+        <button class="btn sm" data-go="issues" data-batch="${b.id}">Other problems</button>
         <button class="btn sm" data-export="${b.id}">${ICON.download} Excel</button>
       </div>
     </div>`;
@@ -393,10 +394,10 @@ function renderImport(params) {
       const acts = $('#doneActions', el);
       acts.innerHTML = `
         <button class="btn primary" data-summary="${batch.id}">Import summary</button>
-        <button class="btn" data-go="records" data-batch="${batch.id}">View records</button>
+        <button class="btn" data-go="records" data-batch="${batch.id}">All PDFs</button>
         <button class="btn" data-go="check-pdf" data-batch="${batch.id}">Check PDF</button>
         <button class="btn" data-go="check-excel" data-batch="${batch.id}">Check Excel</button>
-        <button class="btn" data-go="issues" data-batch="${batch.id}">Issues</button>
+        <button class="btn" data-go="issues" data-batch="${batch.id}">Other problems</button>
         <button class="btn" data-export="${batch.id}">${ICON.download} Download Excel</button>`;
       acts.hidden = false;
       openSummary(batch.id).catch(() => {});
@@ -579,14 +580,14 @@ async function renderCheckExcel(params) {
 async function renderRecords(params) {
   const page = Number(params.get('page')) || 1;
   const q = new URLSearchParams({ page, size: 50 });
-  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus', 'vinlevel', 'excel']) if (params.get(k)) q.set(k, params.get(k));
+  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus', 'vinlevel', 'excel', 'xlband']) if (params.get(k)) q.set(k, params.get(k));
   const data = await api(`/api/records?${q}`);
   state.lastRecords = data.records;
   state.reviewMode = params.get('conf') === 'review';
   const pages = Math.max(1, Math.ceil(data.total / data.size));
 
   view.innerHTML = `
-    <div class="view-head"><div><h1>Records</h1><p>One row per installation PDF — VIN is the primary key. VIN check compares the file name VIN with the VIN photo and the paper VIN box; Date % shows how sure the date is.</p></div>
+    <div class="view-head"><div><h1>All PDFs</h1><p>Every PDF record with both check results — search anything, filter, and use “Needs review” as the work queue. Click a row to check and confirm.</p></div>
       <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Export Excel</button></div>
     <div class="card">
       <form class="toolbar" id="filters">
@@ -598,10 +599,10 @@ async function renderRecords(params) {
         <div class="field"><label>PDF file</label><select class="select" name="fstatus">
           ${[['', 'All'], ['updated', 'Updated'], ['deleted', 'Deleted']].map(([v, l]) => `<option value="${v}" ${(params.get('fstatus') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
-        <div class="field"><label>Excel check</label><select class="select" name="excel">
-          ${[['', 'All'], ['match', 'Match'], ['close', 'Close'], ['different', 'Different'], ['missing', 'Not in Excel']].map(([v, l]) => `<option value="${v}" ${(params.get('excel') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        <div class="field"><label>② Check Excel</label><select class="select" name="xlband">
+          ${[['', 'All'], ['full', '100%'], ['high', '90–99%'], ['medium', '70–89%'], ['low', 'Below 70%'], ['noexcel', 'Not in Excel']].map(([v, l]) => `<option value="${v}" ${(params.get('xlband') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
-        <div class="field"><label>VIN check</label><select class="select" name="vinlevel">
+        <div class="field"><label>① Check PDF</label><select class="select" name="vinlevel">
           ${[['', 'All'], ['1', '① Match 3/3'], ['2', '② File = Photo'], ['3', '③ Not matched']].map(([v, l]) => `<option value="${v}" ${(params.get('vinlevel') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
         <div class="field"><label>Installed from</label><input class="input" type="date" name="from" value="${esc(params.get('from') || '')}"></div>
@@ -611,20 +612,20 @@ async function renderRecords(params) {
       </form>
       <div class="table-wrap">
         ${data.records.length ? `<table>
-          <thead><tr><th title="VIN from the file name (reference)">VIN (file name)</th><th>VIN check</th><th>Photo VIN</th><th>Paper VIN</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>Job number</th><th>Customer</th><th title="VIN found in Excel column H, name vs column D">Excel</th><th>Serial</th><th>Month</th><th></th></tr></thead>
+          <thead><tr><th>Month</th><th title="VIN from the file name (reference)">VIN (file name)</th><th>① Check PDF</th><th>② Check Excel</th><th>Photo VIN</th><th>Paper VIN</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>Job number</th><th>Customer</th><th>Serial</th><th></th></tr></thead>
           <tbody>${data.records.map((r, i) => `
             <tr class="clickable" data-i="${i}">
+              <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td>
               <td class="mono">${esc(r.file_vin || r.vin)}</td>
               <td title="${esc(r.vin_conf_reasons.join(' · '))}">${vinLevelPill(r.vin_level)}</td>
+              <td>${matchPct(r.xl_score, r.xl_band)}</td>
               <td class="mono ${r.vin_picture && r.vin_picture !== r.file_vin ? 'bad-cell' : ''}">${esc(r.vin_picture) || '<span class="faint">not read</span>'}</td>
               <td class="mono ${r.paper_vin !== r.file_vin ? 'warn-cell' : ''}">${esc(r.paper_vin) || '<span class="faint">–</span>'}</td>
               <td class="num">${esc(fmtDate(r.install_date)) || `<span class="pill bad">${esc(r.install_date_raw || 'missing')}</span>`}</td>
               <td title="${esc(r.date_conf_reasons.join(' · '))}">${confPill(r.date_conf)}</td>
               <td class="mono">${esc(r.job_number)}</td>
               <td>${esc(r.customer_name)}</td>
-              <td title="${esc(r.excel_reasons.join(' · '))}">${excelPill(r.excel_status, r.excel_conf)}</td>
               <td class="mono">${esc(r.serial)}</td>
-              <td class="faint">${esc(fmtMonth(r.month))}</td>
               <td style="white-space:nowrap">${r.file_status === 'deleted' ? '' : `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a> `}${fileStatusPill(r)}</td>
             </tr>`).join('')}</tbody></table>` : '<div class="empty">No records match these filters.</div>'}
       </div>
@@ -642,7 +643,7 @@ async function renderRecords(params) {
   f.onsubmit = (e) => { e.preventDefault(); go('records', current()); };
   f.batch.onchange = () => go('records', current());
   f.vinlevel.onchange = () => go('records', current());
-  f.excel.onchange = () => go('records', current());
+  f.xlband.onchange = () => go('records', current());
   f.conf.onchange = () => go('records', current());
   f.fstatus.onchange = () => go('records', current());
   $('#clearF').onclick = () => go('records');
@@ -893,19 +894,20 @@ async function renderIssues(params) {
   const showResolved = params.get('resolved') === 'all';
   const q = new URLSearchParams();
   if (batch) q.set('batch', batch);
-  if (type) q.set('type', type);
+  if (type) q.set('type', type); else q.set('scope', 'other');
   if (text) q.set('q', text);
   if (!showResolved) q.set('resolved', '0');
   const { issues } = await api(`/api/issues?${q}`);
   const detailText = (i) => { try { const d = JSON.parse(i.detail); return d?.message || i.detail; } catch { return i.detail; } };
 
   view.innerHTML = `
-    <div class="view-head"><div><h1>Issues</h1><p>Problems found while importing — check them against the PDF and mark resolved.</p></div></div>
+    <div class="view-head"><div><h1>Other problems</h1><p>Problems that ① Check PDF and ② Check Excel do not show: edited reports, duplicate VINs, scanned pages, charger photo in the VIN slot, failed files and PDFs updated in Drive. Check them and mark resolved.</p></div></div>
     <div class="card">
       <div class="toolbar">
         <div class="field"><label>Month</label><select class="select" id="iBatch">${monthOptions(batch)}</select></div>
-        <div class="field"><label>Type</label><select class="select" id="iType"><option value="">All types</option>
-          ${Object.entries(ISSUE_LABEL).map(([k, [l]]) => `<option value="${k}" ${type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label>Type</label><select class="select" id="iType"><option value="">All other problems</option>
+          ${OTHER_TYPES.map((k) => `<option value="${k}" ${type === k ? 'selected' : ''}>${ISSUE_LABEL[k][0]}</option>`).join('')}
+          ${type && !OTHER_TYPES.includes(type) ? `<option value="${type}" selected>${(ISSUE_LABEL[type] || [type])[0]}</option>` : ''}</select></div>
         ${text ? `<button class="chip active" id="iClearQ" title="Remove text filter">“${esc(text)}” ✕</button>` : ''}
         <label class="check" style="height:40px"><input type="checkbox" id="iResolved" ${showResolved ? 'checked' : ''}> Show resolved</label>
       </div>
@@ -924,9 +926,9 @@ async function renderIssues(params) {
                 ${i.type === 'duplicate_vin' && !i.resolved ? `<button class="btn sm" data-replace="${i.id}" title="Use this PDF's data for the VIN instead of the stored one">Use this PDF</button>` : ''}
                 <button class="btn sm" data-resolve="${i.id}" data-val="${i.resolved ? 0 : 1}">${i.resolved ? 'Reopen' : 'Resolve'}</button>
               </td>
-            </tr>`).join('')}</tbody></table>` : '<div class="empty">No issues — nice.</div>'}
+            </tr>`).join('')}</tbody></table>` : '<div class="empty">No other problems — nice.</div>'}
       </div>
-      <div class="pager"><span>${fmtN(issues.length)} issue${issues.length === 1 ? '' : 's'}</span></div>
+      <div class="pager"><span>${fmtN(issues.length)} problem${issues.length === 1 ? '' : 's'}</span></div>
     </div>`;
   const nav = (keepQ = true) => go('issues', { batch: $('#iBatch').value, type: $('#iType').value, q: keepQ ? text : '', resolved: $('#iResolved').checked ? 'all' : '' });
   if (text) $('#iClearQ').onclick = () => nav(false);
@@ -958,7 +960,7 @@ async function renderMonths() {
     <div class="card">
       <div class="table-wrap">
         ${b.length ? `<table>
-          <thead><tr><th>Month</th><th>Folder</th><th>PDFs</th><th>Processed</th><th>Records</th><th>VIN ✘</th><th>Issues</th><th>Reference</th><th>Status</th><th>Imported</th><th style="text-align:right">Actions</th></tr></thead>
+          <thead><tr><th>Month</th><th>Folder</th><th>PDFs</th><th>Processed</th><th>Records</th><th>VIN ✘</th><th>Problems</th><th>Excel</th><th>Status</th><th>Imported</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>${b.map((x) => `
             <tr>
               <td><input type="month" class="input" value="${esc(x.month)}" data-month="${x.id}" style="height:32px;width:150px"></td>

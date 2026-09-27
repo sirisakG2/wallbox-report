@@ -1,7 +1,7 @@
 // GET /api/stats — dashboard totals across all months
 import { CONFIDENCE_COLUMNS, needsReview, withConfidence } from '../../lib/confidence.js';
 import { buildBaseline } from '../../lib/baseline.js';
-import { json } from '../../lib/server.js';
+import { OTHER_PROBLEMS_SQL, json } from '../../lib/server.js';
 
 export async function onRequestGet({ env }) {
   const row = await env.DB.prepare(`SELECT
@@ -10,7 +10,7 @@ export async function onRequestGet({ env }) {
       (SELECT COUNT(*) FROM records WHERE vin_photo_match = 1) AS ocr_match,
       (SELECT COUNT(*) FROM records WHERE vin_photo_match = 0) AS ocr_mismatch,
       (SELECT COUNT(*) FROM records WHERE vin_photo_match IS NULL) AS ocr_unread,
-      (SELECT COUNT(*) FROM issues WHERE resolved = 0) AS open_issues,
+      (SELECT COUNT(*) FROM issues WHERE resolved = 0 AND ${OTHER_PROBLEMS_SQL}) AS open_issues,
       (SELECT COUNT(*) FROM reference_rows WHERE sheet = 'install') AS reference_rows,
       (SELECT COUNT(DISTINCT f.vin) FROM reference_rows f JOIN records r ON r.vin = f.vin WHERE f.sheet = 'install') AS matched
   `).first();

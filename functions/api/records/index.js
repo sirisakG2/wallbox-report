@@ -1,4 +1,4 @@
-// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&vinlevel=(1|2|3)&excel=(match|close|different|missing)&fstatus=(updated|deleted)&page=1&size=50   (size=all for export)
+// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&vinlevel=(1|2|3)&excel=(match|close|different|missing)&xlband=(full|high|medium|low|noexcel)&fstatus=(updated|deleted)&page=1&size=50   (size=all for export)
 // Every record carries vin_conf / date_conf (0–100) with reasons. conf=review lists records below
 // 95 % (lowest first) so an admin can open the PDF and confirm or correct them.
 import { CONFIDENCE_COLUMNS, needsReview, withConfidence } from '../../../lib/confidence.js';
@@ -29,8 +29,8 @@ export async function onRequestGet({ request, env }) {
      ORDER BY r.install_date DESC, r.vin`).bind(...vals).all();
   let rows = results.map(withConfidence);
   // Counts per check result for the rows matching the other filters (for the filter chips).
-  const facets = { vin: { 1: 0, 2: 0, 3: 0 }, excel: { match: 0, close: 0, different: 0, missing: 0 }, review: 0 };
-  for (const r of rows) { facets.vin[r.vin_level]++; facets.excel[r.excel_status]++; if (needsReview(r)) facets.review++; }
+  const facets = { vin: { 1: 0, 2: 0, 3: 0 }, excel: { match: 0, close: 0, different: 0, missing: 0 }, xl: { full: 0, high: 0, medium: 0, low: 0, noexcel: 0 }, review: 0 };
+  for (const r of rows) { facets.vin[r.vin_level]++; facets.excel[r.excel_status]++; facets.xl[r.xl_band]++; if (needsReview(r)) facets.review++; }
 
   const conf = p.get('conf');
   if (conf === 'review') {
@@ -41,6 +41,8 @@ export async function onRequestGet({ request, env }) {
   }
   const excel = p.get('excel');
   if (['match', 'close', 'different', 'missing'].includes(excel)) rows = rows.filter((r) => r.excel_status === excel);
+  const xlband = p.get('xlband');
+  if (['full', 'high', 'medium', 'low', 'noexcel'].includes(xlband)) rows = rows.filter((r) => r.xl_band === xlband);
   const level = Number(p.get('vinlevel'));
   if (level >= 1 && level <= 3) rows = rows.filter((r) => r.vin_level === level);
 

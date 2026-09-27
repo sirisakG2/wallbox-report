@@ -1,6 +1,6 @@
 // GET  /api/batches  → all months with counts
 // POST /api/batches  → create or reopen (same folder) a month batch; returns processed file ids for resume
-import { bad, folderIdFromUrl, json } from '../../../lib/server.js';
+import { OTHER_PROBLEMS_SQL, bad, folderIdFromUrl, json } from '../../../lib/server.js';
 
 export async function onRequestGet({ request, env }) {
   // ?folder=<url or id> → that month's stored files, to compare with what is in Drive now.
@@ -19,7 +19,7 @@ export async function onRequestGet({ request, env }) {
     SELECT b.*,
       (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id) AS record_count,
       (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.vin_photo_match = 0) AS ocr_mismatch_count,
-      (SELECT COUNT(*) FROM issues i WHERE i.batch_id = b.id AND i.resolved = 0) AS open_issue_count,
+      (SELECT COUNT(*) FROM issues i WHERE i.batch_id = b.id AND i.resolved = 0 AND i.${OTHER_PROBLEMS_SQL}) AS open_issue_count,
       (SELECT COUNT(*) FROM reference_rows f WHERE f.batch_id = b.id AND f.sheet = 'install') AS reference_count,
       (SELECT COUNT(*) FROM reference_rows f JOIN records r ON r.vin = f.vin
          WHERE f.batch_id = b.id AND f.sheet = 'install') AS matched_count,

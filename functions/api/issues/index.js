@@ -1,5 +1,5 @@
-// GET /api/issues?batch=&type=&q=&resolved=0|1
-import { json } from '../../../lib/server.js';
+// GET /api/issues?batch=&type=&q=&resolved=0|1&scope=other (only problems the checks do not show)
+import { OTHER_PROBLEMS_SQL, json } from '../../../lib/server.js';
 
 export async function onRequestGet({ request, env }) {
   const p = new URL(request.url).searchParams;
@@ -7,6 +7,7 @@ export async function onRequestGet({ request, env }) {
   const vals = [];
   if (Number(p.get('batch'))) { where.push('i.batch_id = ?'); vals.push(Number(p.get('batch'))); }
   if (p.get('type')) { where.push('i.type = ?'); vals.push(p.get('type')); }
+  if (p.get('scope') === 'other') where.push(`i.${OTHER_PROBLEMS_SQL}`);
   if (p.get('q')) { where.push('(i.detail LIKE ? OR i.vin LIKE ? OR i.pdf_name LIKE ?)'); vals.push(...Array(3).fill(`%${p.get('q')}%`)); }
   if (p.get('resolved') === '0' || p.get('resolved') === '1') { where.push('i.resolved = ?'); vals.push(Number(p.get('resolved'))); }
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
