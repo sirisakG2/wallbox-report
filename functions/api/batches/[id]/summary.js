@@ -1,4 +1,5 @@
 // GET /api/batches/:id/summary — import result table for one month, computed live from D1.
+import { CONFIDENCE_COLUMNS, withConfidence } from '../../../../lib/confidence.js';
 import { bad, json } from '../../../../lib/server.js';
 
 // Workers AI error when the daily free neuron allocation is used up (code 4006).
@@ -32,9 +33,12 @@ export async function onRequestGet({ params, env }) {
       (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND ${QUOTA.replace(/i\./g, '')}) AS quota_hits`)
     .bind(id).first();
 
+  const { results: recs } = await env.DB.prepare(`SELECT r.*, ${CONFIDENCE_COLUMNS} FROM records r WHERE r.batch_id = ?`).bind(id).all();
+  const levels = { 1: 0, 2: 0, 3: 0 };
+  for (const r of recs) levels[withConfidence(r).vin_level]++;
   return json({
     batch,
-    counts: { ...row, unread_other: row.unread_all - row.unread_quota },
+    counts: { ...row, unread_other: row.unread_all - row.unread_quota, vin_l1: levels[1], vin_l2: levels[2], vin_l3: levels[3] },
     quotaReached: row.quota_hits > 0,
   });
 }

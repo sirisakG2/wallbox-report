@@ -30,15 +30,16 @@ export function freeOcrStatus() {
   return status;
 }
 
-// Returns { result: 'match' | 'charger' | 'unknown', text }.
-export async function freeReadVin(jpegBytes, expectedVin) {
+// expectedVins: candidate VINs in priority order (file name VIN, paper VIN).
+// Returns { result: 'match' | 'charger' | 'unknown', vin (when match), text }.
+export async function freeReadVin(jpegBytes, expectedVins) {
   if (!(await freeOcrStatus()).available) return { result: 'unknown', text: '' };
   const worker = pool.reduce((a, b) => (b.busy < a.busy ? b : a));
   worker.busy++;
   try {
     const copy = jpegBytes.slice(); // the caller still needs the JPEG if AI is used afterwards
-    const r = await worker.call({ type: 'read', jpeg: copy, expected: expectedVin }, [copy.buffer]);
-    return r.ok ? { result: r.result, text: r.text } : { result: 'unknown', text: '' };
+    const r = await worker.call({ type: 'read', jpeg: copy, expected: expectedVins }, [copy.buffer]);
+    return r.ok ? { result: r.result, vin: r.vin || '', text: r.text } : { result: 'unknown', text: '' };
   } finally {
     worker.busy--;
   }

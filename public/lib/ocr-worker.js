@@ -39,16 +39,18 @@ async function toRGBA(jpegBytes) {
   return { data: d.data, width: d.width, height: d.height };
 }
 
-// 'match' only when the exact 17-character PDF VIN appears in the photo.
+// 'match' only when one of the candidate VINs (file name VIN first, then paper VIN) appears exactly
+// in the photo; `vin` says which one.
 async function readVin(jpeg, expected) {
-  const vin = normalizeVin(expected);
+  const cands = [].concat(expected).map(normalizeVin).filter((v) => v.length === 17);
   const img = await toRGBA(jpeg);
   let all = '';
   for (const deg of [0, 270, 90, 180]) {
     const text = await ocr.read(rotateRGBA(img, deg));
     all += ` ${text}`;
     const flat = normalizeVin(text);
-    if (vin.length === 17 && flat.includes(vin)) return { result: 'match', text: text.trim() };
+    const hit = cands.find((v) => flat.includes(v));
+    if (hit) return { result: 'match', vin: hit, text: text.trim() };
     if (deg === 0 && CHARGER_RE.test(text) && !flat.includes('L1NN')) return { result: 'charger', text: text.trim() };
   }
   return { result: 'unknown', text: all.trim() };

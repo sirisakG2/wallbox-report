@@ -15,9 +15,12 @@ CREATE TABLE IF NOT EXISTS batches (
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- One row per installation PDF. VIN is the primary key across all months.
+-- One row per installation PDF. VIN is the primary key across all months: the VIN in the file name
+-- (typed by the installer) when valid, else the photo VIN, else the paper (form) VIN.
 CREATE TABLE IF NOT EXISTS records (
   vin               TEXT PRIMARY KEY,
+  file_vin          TEXT NOT NULL DEFAULT '',  -- VIN in the PDF file name (high priority)
+  paper_vin         TEXT NOT NULL DEFAULT '',  -- VIN in the form's VIN box (low priority)
   batch_id          INTEGER NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
   install_date      TEXT NOT NULL DEFAULT '',  -- ISO YYYY-MM-DD
   install_date_raw  TEXT NOT NULL DEFAULT '',  -- as printed, e.g. "26 พ.ค. 2569"
@@ -32,7 +35,7 @@ CREATE TABLE IF NOT EXISTS records (
   job_url           TEXT NOT NULL DEFAULT '',
   pdf_name          TEXT NOT NULL DEFAULT '',
   pdf_file_id       TEXT NOT NULL DEFAULT '',
-  vin_picture       TEXT NOT NULL DEFAULT '',  -- VIN read from the VIN photo (OCR)
+  vin_picture       TEXT NOT NULL DEFAULT '',  -- VIN read from the VIN photo (must match file_vin)
   vin_photo_match   INTEGER,                   -- 1 match, 0 mismatch, NULL not read
   vin_read_by       TEXT NOT NULL DEFAULT '',  -- free (on-device text recognition) | ai (Workers AI) | ''
   vin_confirmed     INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked the PDF and confirmed/corrected the VIN

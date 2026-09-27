@@ -48,12 +48,13 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
   const dateCol = { numFmt: 'dd/mm/yyyy' };
 
   addSheet(wb, 'Records', [
-    { header: 'VIN (PK)', key: 'vin', width: 21 },
-    { header: 'VIN %', key: 'vin_conf_pct', width: 8 },
+    { header: 'VIN (file name, key)', key: 'vin', width: 21 },
+    { header: 'VIN check', key: 'vin_level_label', width: 15 },
+    { header: 'Photo VIN', key: 'vin_picture', width: 21 },
+    { header: 'Paper VIN', key: 'paper_vin', width: 21 },
     { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
     { header: 'Date %', key: 'date_conf_pct', width: 8 },
     { header: 'Needs review', key: 'needs_review', width: 11 },
-    { header: 'VIN picture', key: 'vin_picture', width: 21 },
     { header: 'VIN photo match', key: 'match', width: 10 },
     { header: 'Read by', key: 'vin_read_by', width: 9 },
     { header: 'Month', key: 'month', width: 9 },
@@ -73,9 +74,9 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     { header: 'Date — why', key: 'date_why', width: 55 },
     { header: 'Notes', key: 'notes', width: 40 },
   ], records.map((r) => ({
-    vin_conf_pct: r.vin_conf / 100,
+    vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
     date_conf_pct: r.date_conf / 100,
-    needs_review: Math.min(r.vin_conf, r.date_conf) < 95 ? 'Yes' : '',
+    needs_review: r.vin_level === 3 || r.date_conf < 95 ? 'Yes' : '',
     vin_why: r.vin_conf_reasons.join('; '),
     file_status_text: r.file_status ? `${r.file_status === 'updated' ? 'Updated' : 'Deleted'} ${String(r.file_status_at).slice(0, 10)}` : '',
     date_why: r.date_conf_reasons.join('; '),
@@ -85,16 +86,17 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     job_url: urlLink(r.job_url),
     pdf_link: driveLink(r.pdf_file_id),
   })), (row, r) => {
-    for (const [key, score] of [['vin_conf_pct', r.vin_conf], ['date_conf_pct', r.date_conf]]) {
-      const cell = row.getCell(key);
-      cell.numFmt = '0%';
-      cell.fill = score >= 95 ? GREEN_FILL : score >= 80 ? AMBER_FILL : RED_FILL;
-    }
-    if (Math.min(r.vin_conf, r.date_conf) < 95) row.getCell('needs_review').fill = AMBER_FILL;
+    const dc = row.getCell('date_conf_pct');
+    dc.numFmt = '0%';
+    dc.fill = r.date_conf >= 95 ? GREEN_FILL : r.date_conf >= 80 ? AMBER_FILL : RED_FILL;
+    row.getCell('vin_level_label').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
+    if (r.vin_picture && r.vin_picture !== r.file_vin) row.getCell('vin_picture').fill = RED_FILL;
+    if (r.paper_vin !== r.file_vin) row.getCell('paper_vin').fill = AMBER_FILL;
+    if (r.vin_level === 3 || r.date_conf < 95) row.getCell('needs_review').fill = AMBER_FILL;
     if (r.file_status === 'deleted') row.getCell('file_status_text').fill = RED_FILL;
     if (r.file_status === 'updated') row.getCell('file_status_text').fill = AMBER_FILL;
     const c = row.getCell('match');
-    if (r.vin_photo_match === 0) { c.fill = RED_FILL; row.getCell('vin_picture').fill = RED_FILL; }
+    if (r.vin_photo_match === 0) c.fill = RED_FILL;
     else if (r.vin_photo_match === 1) c.fill = GREEN_FILL;
     else c.fill = AMBER_FILL;
   });
@@ -169,6 +171,9 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     ['Months included', scope.map((b) => b.month).join(', ')],
     ['PDFs in folder(s)', scope.reduce((a, b) => a + b.pdf_count, 0)],
     ['Records (unique VIN)', records.length],
+    ['VIN ① Match 3/3 (file = photo = paper)', records.filter((r) => r.vin_level === 1).length],
+    ['VIN ② File = Photo (paper differs)', records.filter((r) => r.vin_level === 2).length],
+    ['VIN ③ Not matched (photo ≠ file name)', records.filter((r) => r.vin_level === 3).length],
     ['VIN photo ✔ match', records.filter((r) => r.vin_photo_match === 1).length],
     ['VIN photo ✘ mismatch', records.filter((r) => r.vin_photo_match === 0).length],
     ['VIN photo not read', records.filter((r) => r.vin_photo_match == null).length],

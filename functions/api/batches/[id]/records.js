@@ -26,7 +26,7 @@ export async function onRequestPost({ params, request, env }) {
 
   // Records these files produced before, and what an admin already decided for them.
   const { results: reviewed } = await db.prepare(
-    `SELECT vin, pdf_file_id, vin_confirmed, date_confirmed, install_date, notes FROM records
+    `SELECT vin, file_vin, pdf_file_id, vin_confirmed, date_confirmed, install_date, notes FROM records
      WHERE pdf_file_id IN (${inAll})`)
     .bind(...allIds).all();
   const byFile = new Map(reviewed.map((r) => [r.pdf_file_id, r]));
@@ -43,6 +43,7 @@ export async function onRequestPost({ params, request, env }) {
     const r = item.record;
     if (prev.vin_confirmed && prev.vin !== r.vin) {
       r.vin = prev.vin; // admin-corrected VIN stays
+      if (prev.file_vin) r.file_vin = prev.file_vin;
       r.vin_photo_match = r.vin_picture ? (r.vin_picture === r.vin ? 1 : 0) : null;
       for (const is of item.issues || []) is.vin = prev.vin;
     }

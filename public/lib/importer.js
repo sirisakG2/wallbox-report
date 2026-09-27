@@ -152,6 +152,9 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   const parsed = await pool.parse(buffer);
 
   let f = parsed.fields;
+  // Three VIN sources: file name (reference) · photo (must confirm it) · paper VIN box (low priority).
+  const fileVin = VIN_RE.test(vinFromFileName(file.name)) ? vinFromFileName(file.name) : '';
+  const paperOf = (x) => (VIN_RE.test(normalizeVin(x)) ? normalizeVin(x) : '');
   let vinPicture = '';
   let ocrRaw = '';
   let readBy = '';
@@ -163,7 +166,7 @@ async function processPdf(file, pool, opts, signal, onBytes) {
     notes.push('Page 1 is a scanned image — AI reading was switched off');
     issues.push({ type: 'scanned_page', detail: 'Page 1 has no text layer and AI reading was off; only the file name was used.' });
   } else if (parsed.scanned) {
-    const r = await withRetry(() => ocr('page', parsed.pageJpeg, '', signal, opts));
+    const r = await withRetry(() => ocr('page', parsed.pageJpeg, fileVin, signal, opts));
     f = { ...r.fields };
     f.install_date = parseAnyDate(f.install_date_raw);
     vinPicture = f.vin_picture || '';
@@ -175,9 +178,10 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   } else if (opts.ocr && parsed.vinJpeg) {
     try {
       // 1) Free on-device check; 2) Workers AI only when the free reader can't confirm the VIN.
-      const free = await freeReadVin(parsed.vinJpeg, f.vin).catch(() => ({ result: 'unknown', text: '' }));
+      const cands = [...new Set([fileVin, paperOf(f.vin)].filter(Boolean))];
+      const free = await freeReadVin(parsed.vinJpeg, cands).catch(() => ({ result: 'unknown', text: '' }));
       if (free.result === 'match') {
-        vinPicture = normalizeVin(f.vin);
+        vinPicture = free.vin;
         readBy = 'free';
         ocrRaw = free.text;
       } else if (free.result === 'charger') {
@@ -185,7 +189,7 @@ async function processPdf(file, pool, opts, signal, onBytes) {
         ocrRaw = free.text;
         issues.push({ type: 'vin_photo_wrong', detail: 'The VIN photo slot shows the charger label, not the car VIN' });
       } else {
-        const r = await withRetry(() => ocr('vin', parsed.vinJpeg, f.vin, signal, opts));
+        const r = await withRetry(() => ocr('vin', parsed.vinJpeg, fileVin || paperOf(f.vin), signal, opts));
         vinPicture = r.vin;
         readBy = r.vin ? 'ai' : '';
         ocrRaw = r.raw;
@@ -199,24 +203,24 @@ async function processPdf(file, pool, opts, signal, onBytes) {
     issues.push({ type: 'ocr_failed', detail: 'No VIN photo found on page 1' });
   }
 
-  const fileVin = vinFromFileName(file.name);
-  let vin = normalizeVin(f.vin);
-  if (!VIN_RE.test(vin)) {
-    if (VIN_RE.test(fileVin)) {
-      issues.push({ type: 'missing_vin', detail: `No valid VIN on page 1 ("${f.vin || ''}"); used VIN from file name` });
-      notes.push('VIN taken from file name');
-      vin = fileVin;
-    } else {
-      throw new Error(`No valid VIN in PDF or file name ("${f.vin || ''}")`);
-    }
-  } else if (fileVin && fileVin !== vin) {
-    issues.push({ type: 'filename_vin', detail: `File name VIN ${fileVin} ≠ PDF VIN ${vin}` });
+  const paperVin = paperOf(f.vin);
+  // Record key: the file name VIN; without one, the photo VIN, then the paper VIN.
+  const vin = fileVin || vinPicture || paperVin;
+  if (!vin) throw new Error(`No valid VIN in the file name, photo or form ("${f.vin || ''}")`);
+  if (!fileVin) {
+    issues.push({ type: 'missing_vin', detail: `No valid VIN in the file name — using the ${vinPicture ? 'photo' : 'paper'} VIN ${vin}` });
+    notes.push('No VIN in file name');
+  }
+  if (paperVin && paperVin !== vin) {
+    issues.push({ type: 'filename_vin', detail: `Paper VIN box says ${paperVin}, file name says ${vin}` });
+  } else if (!paperVin) {
+    notes.push(`Paper VIN box not readable ("${f.vin || ''}")`);
   }
 
   let match = null;
   if (vinPicture) {
     match = vinPicture === vin ? 1 : 0;
-    if (!match) issues.push({ type: 'ocr_mismatch', detail: `VIN photo reads ${vinPicture}, PDF says ${vin}` });
+    if (!match) issues.push({ type: 'ocr_mismatch', detail: `VIN photo reads ${vinPicture}, file name says ${vin}` });
   } else if (opts.ocr && !chargerPhoto && !issues.some((i) => i.type === 'ocr_failed')) {
     issues.push({ type: 'ocr_failed', detail: `VIN photo could not be read${ocrRaw ? ` (AI: "${ocrRaw.slice(0, 80)}")` : ''}` });
   }
@@ -246,6 +250,8 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   customer = customer || fileName;
   const record = {
     vin,
+    file_vin: fileVin,
+    paper_vin: paperVin,
     install_date: f.install_date || '',
     install_date_raw: f.install_date_raw || '',
     job_number: String(f.job_number || '').replace(/\s/g, ''),

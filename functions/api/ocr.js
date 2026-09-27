@@ -71,7 +71,8 @@ export async function onRequestPost({ request, env }) {
       fields = fields && typeof fields === 'object' ? fields : {};
       for (const k of Object.keys(fields)) fields[k] = String(fields[k] ?? '').trim();
       fields.vin = normalizeVin(fields.vin);
-      fields.vin_picture = pickVin(fields.vin_picture || '', fields.vin);
+      // Among what the AI read in the VIN photo, prefer the reading closest to the file name VIN.
+      fields.vin_picture = pickVin(fields.vin_picture || '', url.searchParams.get('expected') || fields.vin);
       return json({ raw: JSON.stringify(out?.response ?? ''), fields });
     }
 

@@ -38,6 +38,11 @@ function matchPill(v) {
   if (v === 0) return '<span class="pill bad">Mismatch</span>';
   return '<span class="pill warn">Not read</span>';
 }
+const LEVEL = { 1: ['ok', '① Match 3/3'], 2: ['warn', '② File = Photo'], 3: ['bad', '③ Not matched'] };
+function vinLevelPill(level) {
+  const [tone, label] = LEVEL[level] || ['neutral', '–'];
+  return `<span class="pill ${tone} plain lvl">${label}</span>`;
+}
 function fileStatusPill(r) {
   if (r.file_status === 'updated') return `<span class="pill info" title="PDF changed in Drive and was read again">Updated ${esc(fmtDate(r.file_status_at))}</span>`;
   if (r.file_status === 'deleted') return `<span class="pill bad" title="PDF is no longer in the Drive folder — record kept">Deleted ${esc(fmtDate(r.file_status_at))}</span>`;
@@ -113,19 +118,33 @@ async function route() {
 async function renderDashboard() {
   const s = await api('/api/stats');
   const b = state.batches;
-  const read = s.ocr_match + s.ocr_mismatch;
   const maxBar = Math.max(1, ...s.byInstallMonth.map((x) => x.n));
   view.innerHTML = `
     <div class="view-head">
       <div><h1>Dashboard</h1><p>All imported months at a glance.</p></div>
       <button class="btn primary lg" data-go="import">${ICON.play} Import a month</button>
     </div>
-    <div class="grid cols-5">
+    <div class="grid cols-4">
       <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
-      <div class="card kpi"><div class="label">VIN photo match</div><div class="value">${read ? pct(s.ocr_match, read) : 0}%</div><div class="sub">${fmtN(s.ocr_match)} match · ${fmtN(s.ocr_mismatch)} mismatch</div></div>
       <a class="card kpi kpi-link" href="#/records?conf=review"><div class="label">To review</div><div class="value" style="color:${s.to_review ? 'var(--warn)' : 'inherit'}">${fmtN(s.to_review)}</div><div class="sub">VIN or date below 95% · ${fmtN(s.full_conf)} at 100%</div></a>
       <div class="card kpi"><div class="label">In reference Excel</div><div class="value">${pct(s.matched, s.reference_rows)}%</div><div class="sub">${fmtN(s.matched)} of ${fmtN(s.reference_rows)} rows have a PDF</div></div>
       <div class="card kpi"><div class="label">Open issues</div><div class="value" style="color:${s.open_issues ? 'var(--warn)' : 'inherit'}">${fmtN(s.open_issues)}</div><div class="sub">need a look</div></div>
+    </div>
+
+    <div class="card section-gap">
+      <div class="card-head"><h2>VIN check — file name vs VIN photo vs paper VIN box</h2><span class="faint">file name is the reference</span></div>
+      <div class="grid cols-3 card-pad">
+        ${[1, 2, 3].map((l) => {
+          const n = s.vin_levels[l];
+          const desc = { 1: 'File name = photo = paper VIN box', 2: 'Photo confirms the file name — paper VIN box differs', 3: 'Photo does not confirm the file name — check the PDF' }[l];
+          const tone = { 1: 'ok', 2: 'warn', 3: 'bad' }[l];
+          return `<a class="card kpi kpi-link level-card ${tone}" href="#/records?vinlevel=${l}" style="box-shadow:none;background:var(--surface-2)">
+            <div class="label">${LEVEL[l][1]}</div>
+            <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.records)}%</span></div>
+            <div class="meter"><i style="width:${pct(n, s.records)}%"></i></div>
+            <div class="sub" style="margin-top:8px">${desc}</div></a>`;
+        }).join('')}
+      </div>
     </div>
 
     <div class="grid cols-2 section-gap">
@@ -384,14 +403,14 @@ function changesPanel(plan) {
 async function renderRecords(params) {
   const page = Number(params.get('page')) || 1;
   const q = new URLSearchParams({ page, size: 50 });
-  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus']) if (params.get(k)) q.set(k, params.get(k));
+  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus', 'vinlevel']) if (params.get(k)) q.set(k, params.get(k));
   const data = await api(`/api/records?${q}`);
   state.lastRecords = data.records;
   state.reviewMode = params.get('conf') === 'review';
   const pages = Math.max(1, Math.ceil(data.total / data.size));
 
   view.innerHTML = `
-    <div class="view-head"><div><h1>Records</h1><p>One row per installation PDF — VIN is the primary key. VIN % / Date % show how sure the reading is; below 95% needs a look.</p></div>
+    <div class="view-head"><div><h1>Records</h1><p>One row per installation PDF — VIN is the primary key. VIN check compares the file name VIN with the VIN photo and the paper VIN box; Date % shows how sure the date is.</p></div>
       <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Export Excel</button></div>
     <div class="card">
       <form class="toolbar" id="filters">
@@ -403,8 +422,8 @@ async function renderRecords(params) {
         <div class="field"><label>PDF file</label><select class="select" name="fstatus">
           ${[['', 'All'], ['updated', 'Updated'], ['deleted', 'Deleted']].map(([v, l]) => `<option value="${v}" ${(params.get('fstatus') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
-        <div class="field"><label>VIN photo</label><select class="select" name="match">
-          ${[['', 'All'], ['1', 'Match'], ['0', 'Mismatch'], ['null', 'Not read']].map(([v, l]) => `<option value="${v}" ${params.get('match') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        <div class="field"><label>VIN check</label><select class="select" name="vinlevel">
+          ${[['', 'All'], ['1', '① Match 3/3'], ['2', '② File = Photo'], ['3', '③ Not matched']].map(([v, l]) => `<option value="${v}" ${(params.get('vinlevel') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
         <div class="field"><label>Installed from</label><input class="input" type="date" name="from" value="${esc(params.get('from') || '')}"></div>
         <div class="field"><label>to</label><input class="input" type="date" name="to" value="${esc(params.get('to') || '')}"></div>
@@ -413,18 +432,17 @@ async function renderRecords(params) {
       </form>
       <div class="table-wrap">
         ${data.records.length ? `<table>
-          <thead><tr><th>VIN</th><th title="How sure the VIN is right">VIN %</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>VIN picture</th><th>VIN photo</th><th>Job number</th><th>Customer</th><th>Phone</th><th>Serial</th><th>Month</th><th></th></tr></thead>
+          <thead><tr><th title="VIN from the file name (reference)">VIN (file name)</th><th>VIN check</th><th>Photo VIN</th><th>Paper VIN</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>Job number</th><th>Customer</th><th>Serial</th><th>Month</th><th></th></tr></thead>
           <tbody>${data.records.map((r, i) => `
             <tr class="clickable" data-i="${i}">
-              <td class="mono">${esc(r.vin)}</td>
-              <td title="${esc(r.vin_conf_reasons.join(' · '))}">${confPill(r.vin_conf)}</td>
+              <td class="mono">${esc(r.file_vin || r.vin)}</td>
+              <td title="${esc(r.vin_conf_reasons.join(' · '))}">${vinLevelPill(r.vin_level)}</td>
+              <td class="mono ${r.vin_picture && r.vin_picture !== r.file_vin ? 'bad-cell' : ''}">${esc(r.vin_picture) || '<span class="faint">not read</span>'}</td>
+              <td class="mono ${r.paper_vin !== r.file_vin ? 'warn-cell' : ''}">${esc(r.paper_vin) || '<span class="faint">–</span>'}</td>
               <td class="num">${esc(fmtDate(r.install_date)) || `<span class="pill bad">${esc(r.install_date_raw || 'missing')}</span>`}</td>
               <td title="${esc(r.date_conf_reasons.join(' · '))}">${confPill(r.date_conf)}</td>
-              <td class="mono ${r.vin_photo_match === 0 ? 'bad-cell' : ''}">${esc(r.vin_picture) || '<span class="faint">–</span>'}</td>
-              <td>${matchPill(r.vin_photo_match)}</td>
               <td class="mono">${esc(r.job_number)}</td>
               <td>${esc(r.customer_name)}</td>
-              <td class="num">${esc(r.phone)}</td>
               <td class="mono">${esc(r.serial)}</td>
               <td class="faint">${esc(fmtMonth(r.month))}</td>
               <td style="white-space:nowrap">${r.file_status === 'deleted' ? '' : `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a> `}${fileStatusPill(r)}</td>
@@ -443,7 +461,7 @@ async function renderRecords(params) {
   const current = () => Object.fromEntries(new FormData(f));
   f.onsubmit = (e) => { e.preventDefault(); go('records', current()); };
   f.batch.onchange = () => go('records', current());
-  f.match.onchange = () => go('records', current());
+  f.vinlevel.onchange = () => go('records', current());
   f.conf.onchange = () => go('records', current());
   f.fstatus.onchange = () => go('records', current());
   $('#clearF').onclick = () => go('records');
@@ -460,11 +478,15 @@ function openRecord(r) {
         <a class="btn sm primary" href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener">Open PDF ${ICON.ext}</a></div>
       <div class="review-grid">
         <div class="review-box">
-          <div class="review-head"><span>VIN</span>${confPill(r.vin_conf, true)}</div>
-          <div class="mono review-value">${esc(r.vin)}</div>
+          <div class="review-head"><span>VIN check</span>${vinLevelPill(r.vin_level)}</div>
+          <table class="vin-sources">
+            <tr><td>File name</td><td class="mono">${esc(r.file_vin) || '<span class="faint">none</span>'}</td><td>reference</td></tr>
+            <tr><td>Photo</td><td class="mono">${esc(r.vin_picture) || '<span class="faint">not read</span>'}</td><td>${r.vin_picture && r.vin_picture === r.file_vin ? '<span class="ok-mark">✔</span>' : '<span class="bad-mark">✘</span>'}</td></tr>
+            <tr><td>Paper box</td><td class="mono">${esc(r.paper_vin) || '<span class="faint">not read</span>'}</td><td>${r.paper_vin && r.paper_vin === r.file_vin ? '<span class="ok-mark">✔</span>' : '<span class="warn-mark">✘</span>'}</td></tr>
+          </table>
           ${reasons(r.vin_conf_reasons)}
           <div class="row-actions">
-            ${r.vin_confirmed ? '' : `<button class="btn sm" data-confirm-vin="${esc(r.vin)}">✔ Confirm VIN</button>`}
+            ${r.vin_confirmed || !r.file_vin ? '' : `<button class="btn sm" data-confirm-vin="${esc(r.vin)}" title="I checked the photo in the PDF: it shows the file name VIN">✔ Photo shows this VIN</button>`}
             <button class="btn sm" data-correct-vin="${esc(r.vin)}">Correct VIN</button>
           </div>
         </div>
@@ -520,10 +542,10 @@ async function openSummary(batchId) {
   const b = String(batch.id);
   const rows = [
     ['Records saved', c.saved, 'neutral', 'One record per PDF, keyed by VIN', ['records', { batch: b }]],
-    ['VIN photo ✔ matches PDF', c.vin_match, 'ok', 'AI reading of the VIN photo = VIN in the PDF', ['records', { batch: b, match: '1' }]],
-    ['VIN photo ✘ differs', c.vin_mismatch, 'bad', 'Check the photo — often an AI misread, sometimes a real error', ['records', { batch: b, match: '0' }]],
+    ['VIN ① Match 3/3', c.vin_l1, 'ok', 'File name = VIN photo = paper VIN box', ['records', { batch: b, vinlevel: '1' }]],
+    ['VIN ② File = Photo', c.vin_l2, 'warn', 'Photo confirms the file name; the paper VIN box differs', ['records', { batch: b, vinlevel: '2' }]],
+    ['VIN ③ Not matched', c.vin_l3, 'bad', 'Photo does not confirm the file name (differs or not readable) — check the PDF', ['records', { batch: b, vinlevel: '3' }]],
     ['VIN photo not read — AI quota used up', c.unread_quota, 'warn', 'Daily free Workers AI allowance ran out', ['issues', { batch: b, type: 'ocr_failed', q: 'allocation' }]],
-    ['VIN photo not read — other reasons', c.unread_other, 'warn', 'AI saw no VIN, no photo on page 1, scanned page, or AI reading switched off', ['records', { batch: b, match: 'null' }]],
     ['Files failed (not saved)', c.failed, 'bad', c.failed_quota ? `${fmtN(c.failed_quota)} of them scanned pages that hit the AI quota` : 'Download or reading errors', ['issues', { batch: b, type: 'error' }]],
     ['Duplicate VIN (same VIN in 2 files)', c.duplicates, 'info', 'Second file kept as an issue — choose which one to keep', ['issues', { batch: b, type: 'duplicate_vin' }]],
   ];

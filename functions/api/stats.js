@@ -1,5 +1,5 @@
 // GET /api/stats — dashboard totals across all months
-import { CONFIDENCE_COLUMNS, REVIEW_BELOW, withConfidence } from '../../lib/confidence.js';
+import { CONFIDENCE_COLUMNS, needsReview, withConfidence } from '../../lib/confidence.js';
 import { json } from '../../lib/server.js';
 
 export async function onRequestGet({ env }) {
@@ -17,7 +17,9 @@ export async function onRequestGet({ env }) {
     `SELECT substr(install_date, 1, 7) AS ym, COUNT(*) AS n FROM records WHERE install_date != '' GROUP BY ym ORDER BY ym`).all();
   const { results: recs } = await env.DB.prepare(`SELECT r.*, ${CONFIDENCE_COLUMNS} FROM records r`).all();
   const scored = recs.map(withConfidence);
-  const to_review = scored.filter((r) => Math.min(r.vin_conf, r.date_conf) < REVIEW_BELOW).length;
-  const full_conf = scored.filter((r) => r.vin_conf === 100 && r.date_conf === 100).length;
-  return json({ ...row, to_review, full_conf, byInstallMonth: byMonth });
+  const to_review = scored.filter(needsReview).length;
+  const full_conf = scored.filter((r) => r.vin_level === 1 && r.date_conf === 100).length;
+  const vin_levels = { 1: 0, 2: 0, 3: 0 };
+  for (const r of scored) vin_levels[r.vin_level]++;
+  return json({ ...row, to_review, full_conf, vin_levels, byInstallMonth: byMonth });
 }

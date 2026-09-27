@@ -1,7 +1,7 @@
-// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&fstatus=(updated|deleted)&page=1&size=50   (size=all for export)
+// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&vinlevel=(1|2|3)&fstatus=(updated|deleted)&page=1&size=50   (size=all for export)
 // Every record carries vin_conf / date_conf (0–100) with reasons. conf=review lists records below
 // 95 % (lowest first) so an admin can open the PDF and confirm or correct them.
-import { CONFIDENCE_COLUMNS, REVIEW_BELOW, withConfidence } from '../../../lib/confidence.js';
+import { CONFIDENCE_COLUMNS, needsReview, withConfidence } from '../../../lib/confidence.js';
 import { json } from '../../../lib/server.js';
 
 export async function onRequestGet({ request, env }) {
@@ -31,11 +31,13 @@ export async function onRequestGet({ request, env }) {
 
   const conf = p.get('conf');
   if (conf === 'review') {
-    rows = rows.filter((r) => Math.min(r.vin_conf, r.date_conf) < REVIEW_BELOW)
-      .sort((a, b) => Math.min(a.vin_conf, a.date_conf) - Math.min(b.vin_conf, b.date_conf));
+    rows = rows.filter(needsReview)
+      .sort((a, b) => b.vin_level - a.vin_level || a.date_conf - b.date_conf);
   } else if (conf === 'full') {
-    rows = rows.filter((r) => r.vin_conf === 100 && r.date_conf === 100);
+    rows = rows.filter((r) => r.vin_level === 1 && r.date_conf === 100);
   }
+  const level = Number(p.get('vinlevel'));
+  if (level >= 1 && level <= 3) rows = rows.filter((r) => r.vin_level === level);
 
   const total = rows.length;
   const all = p.get('size') === 'all';

@@ -40,7 +40,7 @@ export async function onRequestPatch({ params, request, env }) {
     if (nv !== vin) {
       const clash = await db.prepare('SELECT vin FROM records WHERE vin = ?').bind(nv).first();
       if (clash) return bad(`VIN ${nv} already exists as another record`, 409);
-      stmts.push(db.prepare(`UPDATE records SET vin = ?2, vin_confirmed = 1, vin_photo_match = CASE WHEN vin_picture = ?2 THEN 1 ELSE vin_photo_match END,
+      stmts.push(db.prepare(`UPDATE records SET vin = ?2, file_vin = ?2, vin_confirmed = 1, vin_photo_match = CASE WHEN vin_picture = ?2 THEN 1 ELSE vin_photo_match END,
         ${noteSql}, updated_at = datetime('now') WHERE vin = ?3`).bind(`VIN corrected by admin: ${vin} → ${nv}`, nv, vin));
       stmts.push(db.prepare('UPDATE issues SET vin = ? WHERE vin = ?').bind(nv, vin));
       finalVin = nv;
