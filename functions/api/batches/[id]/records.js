@@ -1,9 +1,10 @@
 // POST /api/batches/:id/records — save a chunk of processed PDFs.
-// Body: { items: [{ file: {id, name}, record: {...} | null, issues: [{type, detail, vin}] }] }
+// Body: { items: [{ file: {id, name, modified, size}, record: {...} | null, issues: [{type, detail, vin}],
+//                   update?: true (PDF changed in Drive), replaces?: <old file id> (re-uploaded under a new id) }] }
 // VIN is the primary key: if the VIN already exists from a different PDF (same or other month),
 // the original is kept and a duplicate_vin issue is logged (can be replaced from the Issues tab).
 // Re-reading a file never undoes admin review: a confirmed/corrected VIN or date, admin notes and
-// resolved issues are carried over to the new reading.
+// resolved issues are carried over to the new reading (also to a re-uploaded copy that replaces it).
 import { upsertRecord } from '../../../../lib/db.js';
 import { bad, json, runBatched } from '../../../../lib/server.js';
 
@@ -19,20 +20,25 @@ export async function onRequestPost({ params, request, env }) {
   const stmts = [];
   const fileIds = items.map((i) => i.file.id);
   const inFiles = fileIds.map(() => '?').join(',');
+  const replaced = items.map((i) => i.replaces).filter(Boolean);
+  const allIds = [...fileIds, ...replaced];
+  const inAll = allIds.map(() => '?').join(',');
 
   // Records these files produced before, and what an admin already decided for them.
   const { results: reviewed } = await db.prepare(
     `SELECT vin, pdf_file_id, vin_confirmed, date_confirmed, install_date, notes FROM records
-     WHERE pdf_file_id IN (${inFiles})`)
-    .bind(...fileIds).all();
+     WHERE pdf_file_id IN (${inAll})`)
+    .bind(...allIds).all();
   const byFile = new Map(reviewed.map((r) => [r.pdf_file_id, r]));
   const { results: resolvedRows } = await db.prepare(
-    `SELECT pdf_file_id, type FROM issues WHERE batch_id = ? AND resolved = 1 AND pdf_file_id IN (${inFiles})`)
-    .bind(batchId, ...fileIds).all();
-  const wasResolved = new Set(resolvedRows.map((r) => `${r.pdf_file_id}|${r.type}`));
+    `SELECT pdf_file_id, type FROM issues WHERE batch_id = ? AND resolved = 1 AND pdf_file_id IN (${inAll})`)
+    .bind(batchId, ...allIds).all();
+  // A re-uploaded file inherits what was resolved on the file it replaces.
+  const oldToNew = new Map(items.filter((i) => i.replaces).map((i) => [i.replaces, i.file.id]));
+  const wasResolved = new Set(resolvedRows.map((r) => `${oldToNew.get(r.pdf_file_id) || r.pdf_file_id}|${r.type}`));
 
   for (const item of items) {
-    const prev = item.record && byFile.get(item.file.id);
+    const prev = item.record && (byFile.get(item.file.id) || (item.replaces && byFile.get(item.replaces)));
     if (!prev) continue;
     const r = item.record;
     if (prev.vin_confirmed && prev.vin !== r.vin) {
@@ -46,7 +52,7 @@ export async function onRequestPost({ params, request, env }) {
   }
 
   // Re-processing a file replaces the issues it produced earlier (resolved ones stay resolved).
-  stmts.push(db.prepare(`DELETE FROM issues WHERE batch_id = ? AND pdf_file_id IN (${inFiles})`).bind(batchId, ...fileIds));
+  stmts.push(db.prepare(`DELETE FROM issues WHERE batch_id = ? AND pdf_file_id IN (${inAll})`).bind(batchId, ...allIds));
 
   const vins = [...new Set(items.map((i) => i.record?.vin).filter(Boolean))];
   const existing = new Map();
@@ -65,13 +71,20 @@ export async function onRequestPost({ params, request, env }) {
 
     if (record?.vin) {
       const prev = existing.get(record.vin);
-      if (!prev || prev.pdf_file_id === file.id) {
+      if (!prev || prev.pdf_file_id === file.id || (item.replaces && prev.pdf_file_id === item.replaces)) {
         // Same file previously read with a different (unconfirmed) VIN: the new reading replaces it.
-        const before = byFile.get(file.id);
+        const beforeId = byFile.has(file.id) ? file.id : item.replaces;
+        const before = beforeId && byFile.get(beforeId);
         if (before && before.vin !== record.vin && !before.vin_confirmed) {
-          stmts.push(db.prepare('DELETE FROM records WHERE vin = ? AND pdf_file_id = ?').bind(before.vin, file.id));
+          stmts.push(db.prepare('DELETE FROM records WHERE vin = ? AND pdf_file_id = ?').bind(before.vin, beforeId));
         }
         stmts.push(upsertRecord(db, batchId, record));
+        if (item.update) {
+          stmts.push(db.prepare(`UPDATE records SET file_status = 'updated', file_status_at = datetime('now') WHERE vin = ?`).bind(record.vin));
+        }
+        if (item.replaces) {
+          stmts.push(db.prepare(`UPDATE batch_files SET status = 'replaced' WHERE batch_id = ? AND file_id = ?`).bind(batchId, item.replaces));
+        }
         existing.set(record.vin, { vin: record.vin, batch_id: batchId, pdf_file_id: file.id, pdf_name: file.name });
         status = 'saved'; saved++;
       } else {
@@ -95,9 +108,11 @@ export async function onRequestPost({ params, request, env }) {
         .bind(batchId, String(is.vin || record?.vin || ''), file.name, file.id, is.type, String(is.detail || ''),
           wasResolved.has(`${file.id}|${is.type}`) ? 1 : 0));
     }
-    stmts.push(db.prepare(`INSERT INTO batch_files (batch_id, file_id, name, status) VALUES (?, ?, ?, ?)
-      ON CONFLICT(batch_id, file_id) DO UPDATE SET status = excluded.status, name = excluded.name`)
-      .bind(batchId, file.id, file.name, status));
+    stmts.push(db.prepare(`INSERT INTO batch_files (batch_id, file_id, name, status, modified, size, processed_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(batch_id, file_id) DO UPDATE SET status = excluded.status, name = excluded.name,
+        modified = excluded.modified, size = excluded.size, processed_at = excluded.processed_at`)
+      .bind(batchId, file.id, file.name, status, String(file.modified || ''), Number(file.size) || 0));
   }
 
   await runBatched(db, stmts);

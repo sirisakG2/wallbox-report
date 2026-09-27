@@ -68,6 +68,7 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     { header: 'Job URL', key: 'job_url', width: 30 },
     { header: 'PDF file', key: 'pdf_name', width: 40 },
     { header: 'PDF link', key: 'pdf_link', width: 10 },
+    { header: 'PDF file status', key: 'file_status_text', width: 20 },
     { header: 'VIN — why', key: 'vin_why', width: 55 },
     { header: 'Date — why', key: 'date_why', width: 55 },
     { header: 'Notes', key: 'notes', width: 40 },
@@ -76,6 +77,7 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
     date_conf_pct: r.date_conf / 100,
     needs_review: Math.min(r.vin_conf, r.date_conf) < 95 ? 'Yes' : '',
     vin_why: r.vin_conf_reasons.join('; '),
+    file_status_text: r.file_status ? `${r.file_status === 'updated' ? 'Updated' : 'Deleted'} ${String(r.file_status_at).slice(0, 10)}` : '',
     date_why: r.date_conf_reasons.join('; '),
     ...r,
     match: flagText(r.vin_photo_match),
@@ -89,6 +91,8 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label }) {
       cell.fill = score >= 95 ? GREEN_FILL : score >= 80 ? AMBER_FILL : RED_FILL;
     }
     if (Math.min(r.vin_conf, r.date_conf) < 95) row.getCell('needs_review').fill = AMBER_FILL;
+    if (r.file_status === 'deleted') row.getCell('file_status_text').fill = RED_FILL;
+    if (r.file_status === 'updated') row.getCell('file_status_text').fill = AMBER_FILL;
     const c = row.getCell('match');
     if (r.vin_photo_match === 0) { c.fill = RED_FILL; row.getCell('vin_picture').fill = RED_FILL; }
     else if (r.vin_photo_match === 1) c.fill = GREEN_FILL;

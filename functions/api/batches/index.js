@@ -2,7 +2,19 @@
 // POST /api/batches  → create or reopen (same folder) a month batch; returns processed file ids for resume
 import { bad, folderIdFromUrl, json } from '../../../lib/server.js';
 
-export async function onRequestGet({ env }) {
+export async function onRequestGet({ request, env }) {
+  // ?folder=<url or id> → that month's stored files, to compare with what is in Drive now.
+  const folder = new URL(request.url).searchParams.get('folder');
+  if (folder) {
+    const folderId = folderIdFromUrl(folder);
+    const batch = folderId && await env.DB.prepare('SELECT * FROM batches WHERE folder_id = ?').bind(folderId).first();
+    if (!batch) return json({ batch: null, files: [] });
+    const { results } = await env.DB.prepare(
+      `SELECT f.file_id, f.name, f.status, f.modified, f.processed_at, r.vin, r.file_status
+       FROM batch_files f LEFT JOIN records r ON r.pdf_file_id = f.file_id WHERE f.batch_id = ?`).bind(batch.id).all();
+    return json({ batch, files: results });
+  }
+
   const { results } = await env.DB.prepare(`
     SELECT b.*,
       (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id) AS record_count,
@@ -11,7 +23,9 @@ export async function onRequestGet({ env }) {
       (SELECT COUNT(*) FROM reference_rows f WHERE f.batch_id = b.id AND f.sheet = 'install') AS reference_count,
       (SELECT COUNT(*) FROM reference_rows f JOIN records r ON r.vin = f.vin
          WHERE f.batch_id = b.id AND f.sheet = 'install') AS matched_count,
-      (SELECT COUNT(*) FROM batch_files x WHERE x.batch_id = b.id) AS processed_count
+      (SELECT COUNT(*) FROM batch_files x WHERE x.batch_id = b.id AND x.status != 'replaced') AS processed_count,
+      (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.file_status = 'deleted') AS deleted_count,
+      (SELECT COUNT(*) FROM records r WHERE r.batch_id = b.id AND r.file_status = 'updated') AS updated_count
     FROM batches b ORDER BY b.month DESC, b.id DESC`).all();
   return json({ batches: results });
 }

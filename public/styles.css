@@ -354,3 +354,9 @@ body.locked > :not(.login-screen) { display: none !important; }
 .reasons { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 12.5px; line-height: 1.55; flex: 1; }
 .kpi-link { color: inherit; text-decoration: none !important; transition: border-color 0.15s; }
 .kpi-link:hover { border-color: var(--accent); }
+
+/* Folder changes */
+.changes { border: 1px solid var(--border); background: var(--surface-2); border-radius: 12px; padding: 12px 14px; }
+.changes-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: 560; }
+.change-block { margin-top: 10px; font-size: 13px; }
+.change-list { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); max-height: 160px; overflow: auto; }

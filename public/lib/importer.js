@@ -98,6 +98,7 @@ async function download(fileId, signal, onBytes) {
     throw new Error(j.error || `Download failed (${res.status})`);
   }
   const total = Number(res.headers.get('x-file-size')) || 0;
+  if (onBytes) onBytes.version = { modified: res.headers.get('x-file-modified') || '', size: total };
   const reader = res.body.getReader();
   const chunks = [];
   let got = 0;
@@ -147,6 +148,7 @@ export function dateProblem(iso, month) {
 async function processPdf(file, pool, opts, signal, onBytes) {
   const issues = [];
   const buffer = await withRetry(() => download(file.id, signal, onBytes));
+  if (onBytes?.version) Object.assign(file, onBytes.version);
   const parsed = await pool.parse(buffer);
 
   let f = parsed.fields;
@@ -267,8 +269,54 @@ async function processPdf(file, pool, opts, signal, onBytes) {
   return { record, issues };
 }
 
+// Compares the Drive folder with what was imported before:
+//   new       — never imported
+//   updated   — same file with a newer modified date, or a file re-uploaded under the same name
+//   deleted   — imported before, no longer in the folder (record kept, marked "Deleted")
+//   restored  — marked deleted before, back in the folder
+//   unchanged — nothing to do
+const nameKey = (n) => String(n || '').normalize('NFC').trim().toLowerCase();
+const toMs = (s) => (s ? Date.parse(/Z$|[+-]\d\d:?\d\d$/.test(s) ? s : `${s.replace(' ', 'T')}Z`) : NaN);
+
+export async function planFolder(pdfs, stored) {
+  const live = stored.filter((f) => f.status !== 'replaced');
+  const byId = new Map(live.map((f) => [f.file_id, f]));
+  const byName = new Map(live.map((f) => [nameKey(f.name), f]));
+  const inFolder = new Set(pdfs.map((f) => f.id));
+  const plan = { new: [], updated: [], unchanged: [], deleted: [], restored: [] };
+  const sameDay = [];
+  for (const f of pdfs) {
+    const s = byId.get(f.id);
+    if (s) {
+      if (s.file_status === 'deleted') plan.restored.push(f.id);
+      const readAt = s.modified || s.processed_at;
+      const readDay = readAt ? new Date(toMs(readAt)).toISOString().slice(0, 10) : '';
+      if (f.modifiedDay && readDay && f.modifiedDay > readDay) plan.updated.push({ file: f, vin: s.vin, why: `modified ${f.modifiedDay}` });
+      else if (f.modifiedDay && readDay && f.modifiedDay === readDay) sameDay.push({ f, s, readAt });
+      else plan.unchanged.push(f);
+      continue;
+    }
+    const old = byName.get(nameKey(f.name));
+    if (old && !inFolder.has(old.file_id)) plan.updated.push({ file: f, replaces: old.file_id, vin: old.vin, why: 're-uploaded' });
+    else plan.new.push(f);
+  }
+  // Same day as the version we read: ask Drive for the exact time.
+  await Promise.all(sameDay.map(async ({ f, s, readAt }) => {
+    try {
+      const h = await api(`/api/drive/file?id=${encodeURIComponent(f.id)}&head=1`);
+      if (h.modified && toMs(h.modified) > toMs(readAt) + 60000) plan.updated.push({ file: f, vin: s.vin, why: `modified ${h.modified.slice(0, 16).replace('T', ' ')}` });
+      else plan.unchanged.push(f);
+    } catch { plan.unchanged.push(f); }
+  }));
+  const replacedIds = new Set(plan.updated.map((u) => u.replaces).filter(Boolean));
+  for (const s of live) {
+    if (!inFolder.has(s.file_id) && !replacedIds.has(s.file_id) && s.file_status !== 'deleted') plan.deleted.push(s);
+  }
+  return plan;
+}
+
 // Runs a whole import. `ui` receives progress callbacks.
-export async function runImport({ folder, month, reprocess = false, retry = false, ocr: useOcr = true, limit = 0, concurrency = 5 }, ui, signal) {
+export async function runImport({ folder, month, plan = null, reprocess = false, retry = false, ocr: useOcr = true, limit = 0, concurrency = 5 }, ui, signal) {
   const pdfs = folder.files.filter((f) => f.type === 'pdf');
   const refFile = folder.files.find((f) => f.type === 'xlsx');
 
@@ -294,10 +342,16 @@ export async function runImport({ folder, month, reprocess = false, retry = fals
   }
 
   const done = new Set(reprocess ? [] : doneFileIds);
+  const inFolder = new Set(pdfs.map((f) => f.id));
   if (retry && !reprocess) {
-    for (const id of retryFileIds) done.delete(id);
-    ui.log(`Retrying ${retryFileIds.length} file(s) with an unread VIN photo or an error`);
+    const ids = retryFileIds.filter((id) => inFolder.has(id));
+    for (const id of ids) done.delete(id);
+    ui.log(`Retrying ${ids.length} file(s) with an unread VIN photo or an error`);
   }
+  // Files changed in Drive since they were read.
+  const updates = new Map((plan?.updated || []).map((u) => [u.file.id, u]));
+  for (const id of updates.keys()) done.delete(id);
+  if (updates.size) ui.log(`Updated in Drive since the last import: ${updates.size} file(s) — they will be read again`, 'warn');
   let queue = pdfs.filter((f) => !done.has(f.id));
   if (limit > 0) queue = queue.slice(0, limit);
   const stats = { total: queue.length, done: 0, saved: 0, duplicates: 0, errors: 0, issues: 0, bytes: 0, aiCalls: 0, free: 0, deferred: 0 };
@@ -340,7 +394,9 @@ export async function runImport({ folder, month, reprocess = false, retry = fals
       try {
         const { record, issues } = await processPdf(file, pool, aiOpts, signal, (n) => { stats.bytes += n; ui.progress(stats); });
         if (record.vin_read_by === 'free') stats.free++;
-        item = { file, record, issues };
+        const u = updates.get(file.id);
+        item = { file, record, issues, ...(u ? { update: true, replaces: u.replaces } : {}) };
+        if (u) issues.push({ type: 'file_updated', vin: record.vin, detail: `PDF ${u.why === 're-uploaded' ? 're-uploaded' : 'changed'} in Drive (${u.why}) — read again` });
         stats.issues += issues.length;
         const flags = issues.map((i) => i.type).join(', ');
         ui.log(`${record.vin} · ${record.install_date || '?'} · ${file.name}${flags ? ` — ${flags}` : ''}`, flags ? 'warn' : 'ok');
@@ -372,6 +428,15 @@ export async function runImport({ folder, month, reprocess = false, retry = fals
     await flush();
   } finally {
     pool.stop();
+  }
+
+  // PDFs removed from / back in the Drive folder.
+  const deleted = (plan?.deleted || []).map((d) => d.file_id);
+  const restored = plan?.restored || [];
+  if (deleted.length || restored.length) {
+    await api(`/api/batches/${batch.id}/file-status`, { method: 'POST', body: { deleted, restored } });
+    if (deleted.length) ui.log(`${deleted.length} PDF(s) no longer in the folder — records kept and marked "Deleted"`, 'warn');
+    if (restored.length) ui.log(`${restored.length} PDF(s) are back in the folder — "Deleted" mark removed`, 'ok');
   }
 
   const status = signal.aborted || stats.done < stats.total || stats.deferred ? 'partial' : 'done';

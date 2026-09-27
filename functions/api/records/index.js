@@ -1,4 +1,4 @@
-// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&page=1&size=50   (size=all for export)
+// GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&fstatus=(updated|deleted)&page=1&size=50   (size=all for export)
 // Every record carries vin_conf / date_conf (0–100) with reasons. conf=review lists records below
 // 95 % (lowest first) so an admin can open the PDF and confirm or correct them.
 import { CONFIDENCE_COLUMNS, REVIEW_BELOW, withConfidence } from '../../../lib/confidence.js';
@@ -20,6 +20,8 @@ export async function onRequestGet({ request, env }) {
   if (match === 'null') where.push('r.vin_photo_match IS NULL');
   if (p.get('from')) { where.push('r.install_date >= ?'); vals.push(p.get('from')); }
   if (p.get('to')) { where.push('r.install_date <= ?'); vals.push(p.get('to')); }
+  const fstatus = p.get('fstatus');
+  if (fstatus === 'updated' || fstatus === 'deleted') { where.push('r.file_status = ?'); vals.push(fstatus); }
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   const { results } = await env.DB.prepare(

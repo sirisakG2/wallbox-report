@@ -1,6 +1,6 @@
 // Admin console: Dashboard · Import month · Records · Compare · Issues · Months · Export
 import { api } from './lib/api.js';
-import { runImport, suggestMonth } from './lib/importer.js';
+import { planFolder, runImport, suggestMonth } from './lib/importer.js';
 import { freeOcrStatus } from './lib/free-ocr.js';
 import { downloadWorkbook } from './lib/report.js';
 
@@ -38,6 +38,11 @@ function matchPill(v) {
   if (v === 0) return '<span class="pill bad">Mismatch</span>';
   return '<span class="pill warn">Not read</span>';
 }
+function fileStatusPill(r) {
+  if (r.file_status === 'updated') return `<span class="pill info" title="PDF changed in Drive and was read again">Updated ${esc(fmtDate(r.file_status_at))}</span>`;
+  if (r.file_status === 'deleted') return `<span class="pill bad" title="PDF is no longer in the Drive folder — record kept">Deleted ${esc(fmtDate(r.file_status_at))}</span>`;
+  return '';
+}
 function confPill(score, big = false) {
   const tone = score >= 95 ? 'ok' : score >= 80 ? 'warn' : 'bad';
   return `<span class="pill ${tone} plain conf${big ? ' conf-big' : ''}">${score}%</span>`;
@@ -57,7 +62,7 @@ const ISSUE_LABEL = {
   duplicate_vin: ['Duplicate VIN', 'warn'], filename_vin: ['File name VIN', 'info'], ocr_mismatch: ['VIN photo mismatch', 'bad'],
   ocr_failed: ['VIN photo unread', 'warn'], bad_date: ['Bad date', 'bad'], missing_vin: ['Missing VIN', 'bad'],
   scanned_page: ['Scanned page', 'info'], error: ['Error', 'bad'], vin_photo_wrong: ['Charger photo in VIN slot', 'warn'],
-  edited_pdf: ['PDF may be edited', 'bad'], suspicious_date: ['Suspicious date', 'warn'],
+  edited_pdf: ['PDF may be edited', 'bad'], suspicious_date: ['Suspicious date', 'warn'], file_updated: ['PDF updated in Drive', 'info'],
 };
 const issuePill = (t) => { const [l, c] = ISSUE_LABEL[t] || [t, 'neutral']; return `<span class="pill ${c}">${esc(l)}</span>`; };
 
@@ -159,7 +164,7 @@ function monthCard(b) {
         <div class="stat"><b style="color:${b.open_issue_count ? 'var(--warn)' : 'inherit'}">${fmtN(b.open_issue_count)}</b><span>Issues</span></div>
       </div>
       <div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-3);margin-bottom:6px"><span>Processed ${fmtN(b.processed_count)} / ${fmtN(b.pdf_count)}</span><span>Reference match ${b.reference_count ? pct(b.matched_count, b.reference_count) : 0}%</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-3);margin-bottom:6px"><span>Processed ${fmtN(b.processed_count)} / ${fmtN(b.pdf_count)}${b.updated_count ? ` · <span style="color:var(--info)">${fmtN(b.updated_count)} updated</span>` : ''}${b.deleted_count ? ` · <span style="color:var(--bad)">${fmtN(b.deleted_count)} deleted</span>` : ''}</span><span>Reference match ${b.reference_count ? pct(b.matched_count, b.reference_count) : 0}%</span></div>
         <div class="meter"><i style="width:${done}%"></i></div>
       </div>
       <div class="row-actions">
@@ -192,6 +197,7 @@ function renderImport(params) {
           <div class="info-tile"><span class="label-sm">Month</span><input type="month" class="input" id="fMonth" style="height:32px;width:100%;margin-top:2px"></div>
         </div>
         <div id="fExisting" class="muted" style="margin-top:14px" hidden></div>
+        <div id="changes" style="margin-top:14px"></div>
         <div id="freeStatus" style="margin-top:14px"></div>
         <div class="options">
           <label class="check"><input type="checkbox" id="optOcr" checked> Read VIN photo with AI</label>
@@ -248,6 +254,15 @@ function renderImport(params) {
       ex.hidden = !existing;
       if (existing) ex.innerHTML = `This folder was imported before as <strong>${esc(fmtMonth(existing.month, true))}</strong> — ${fmtN(existing.processed_count)} of ${fmtN(existing.pdf_count)} files processed. Starting again resumes with the remaining files${existing.processed_count ? ' and, with “Retry unread / failed”, re-reads unread VIN photos' : ''}.`;
       $('#folderBox', el).hidden = false;
+      folder.plan = null;
+      $('#changes', el).innerHTML = '';
+      if (existing) {
+        $('#changes', el).innerHTML = '<span class="pill neutral">Comparing with the last import…</span>';
+        const stored = await api(`/api/batches?folder=${encodeURIComponent(url)}`);
+        const plan = await planFolder(pdfs, stored.files);
+        folder.plan = plan;
+        $('#changes', el).innerHTML = changesPanel(plan);
+      }
       $('#freeStatus', el).innerHTML = '<span class="pill neutral">Free VIN reader loading…</span>';
       const fs = await freeOcrStatus();
       $('#freeStatus', el).innerHTML = fs.available
@@ -310,7 +325,7 @@ function renderImport(params) {
 
     try {
       const { batch } = await runImport({
-        folder, month,
+        folder, month, plan: folder.plan,
         reprocess: $('#optReprocess', el).checked,
         retry: $('#optRetry', el).checked,
         ocr: $('#optOcr', el).checked,
@@ -345,11 +360,31 @@ function renderImport(params) {
   };
 }
 
+function changesPanel(plan) {
+  const list = (items, fmt) => items.length
+    ? `<ul class="change-list">${items.slice(0, 12).map((x) => `<li>${fmt(x)}</li>`).join('')}${items.length > 12 ? `<li class="faint">… and ${items.length - 12} more</li>` : ''}</ul>` : '';
+  const nothing = !plan.new.length && !plan.updated.length && !plan.deleted.length && !plan.restored.length;
+  return `
+    <div class="changes">
+      <div class="changes-head">Since the last import:
+        <span class="pill ${plan.new.length ? 'info' : 'neutral'}">${fmtN(plan.new.length)} new</span>
+        <span class="pill ${plan.updated.length ? 'warn' : 'neutral'}">${fmtN(plan.updated.length)} updated</span>
+        <span class="pill ${plan.deleted.length ? 'bad' : 'neutral'}">${fmtN(plan.deleted.length)} deleted</span>
+        ${plan.restored.length ? `<span class="pill ok">${fmtN(plan.restored.length)} back again</span>` : ''}
+        <span class="pill neutral">${fmtN(plan.unchanged.length)} unchanged</span>
+        ${nothing ? '<span class="muted">— nothing changed in the folder.</span>' : ''}
+      </div>
+      ${plan.updated.length ? `<div class="change-block"><b>Updated</b> — read again; admin review is kept, record marked “Updated”${list(plan.updated, (u) => `${esc(u.file.name)} <span class="faint">(${esc(u.why)})</span>`)}</div>` : ''}
+      ${plan.deleted.length ? `<div class="change-block"><b>Deleted</b> — no longer in the folder; records are kept and marked “Deleted”${list(plan.deleted, (d) => `${esc(d.name)}${d.vin ? ` <span class="mono faint">${esc(d.vin)}</span>` : ''}`)}</div>` : ''}
+      ${plan.new.length ? `<div class="change-block"><b>New</b>${list(plan.new, (f) => esc(f.name))}</div>` : ''}
+    </div>`;
+}
+
 // ---------- Records ----------
 async function renderRecords(params) {
   const page = Number(params.get('page')) || 1;
   const q = new URLSearchParams({ page, size: 50 });
-  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf']) if (params.get(k)) q.set(k, params.get(k));
+  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus']) if (params.get(k)) q.set(k, params.get(k));
   const data = await api(`/api/records?${q}`);
   state.lastRecords = data.records;
   state.reviewMode = params.get('conf') === 'review';
@@ -364,6 +399,9 @@ async function renderRecords(params) {
         <div class="field grow"><label>Search</label><input class="input" name="q" placeholder="VIN, name, job number, serial, phone…" value="${esc(params.get('q') || '')}"></div>
         <div class="field"><label>Confidence</label><select class="select" name="conf">
           ${[['', 'All'], ['review', 'Needs review (<95%)'], ['full', '100% only']].map(([v, l]) => `<option value="${v}" ${(params.get('conf') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>PDF file</label><select class="select" name="fstatus">
+          ${[['', 'All'], ['updated', 'Updated'], ['deleted', 'Deleted']].map(([v, l]) => `<option value="${v}" ${(params.get('fstatus') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
         <div class="field"><label>VIN photo</label><select class="select" name="match">
           ${[['', 'All'], ['1', 'Match'], ['0', 'Mismatch'], ['null', 'Not read']].map(([v, l]) => `<option value="${v}" ${params.get('match') === v ? 'selected' : ''}>${l}</option>`).join('')}
@@ -389,7 +427,7 @@ async function renderRecords(params) {
               <td class="num">${esc(r.phone)}</td>
               <td class="mono">${esc(r.serial)}</td>
               <td class="faint">${esc(fmtMonth(r.month))}</td>
-              <td><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a></td>
+              <td style="white-space:nowrap">${r.file_status === 'deleted' ? '' : `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a> `}${fileStatusPill(r)}</td>
             </tr>`).join('')}</tbody></table>` : '<div class="empty">No records match these filters.</div>'}
       </div>
       <div class="pager">
@@ -407,6 +445,7 @@ async function renderRecords(params) {
   f.batch.onchange = () => go('records', current());
   f.match.onchange = () => go('records', current());
   f.conf.onchange = () => go('records', current());
+  f.fstatus.onchange = () => go('records', current());
   $('#clearF').onclick = () => go('records');
   $('#prevP').onclick = () => go('records', { ...current(), page: page - 1 });
   $('#nextP').onclick = () => go('records', { ...current(), page: page + 1 });
@@ -454,7 +493,7 @@ function openRecord(r) {
     ['Report printed', esc(r.report_printed_at)],
     ['Month', esc(fmtMonth(r.month, true))],
     ['Job URL', r.job_url ? `<a href="${esc(r.job_url)}" target="_blank" rel="noopener">${esc(r.job_url)} ${ICON.ext}</a>` : '–'],
-    ['PDF', `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener">${esc(r.pdf_name)} ${ICON.ext}</a>`],
+    ['PDF', `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener">${esc(r.pdf_name)} ${ICON.ext}</a> ${fileStatusPill(r)}`],
     ['Raw reading', `<span class="mono faint">${esc(r.ocr_raw) || '–'}</span>`],
     ['Notes', esc(r.notes) || '–'],
     ['Last updated', esc(r.updated_at)],
@@ -517,6 +556,9 @@ async function openSummary(batchId) {
           </tr>`).join('')}</tbody>
       </table>
       <div class="kv" style="border:0;margin-top:10px"><dt>Other checks</dt><dd class="muted">${fmtN(c.missing_vin)} VIN taken from file name · ${fmtN(c.bad_date)} unreadable dates · ${fmtN(c.charger_photo)} charger photo in VIN slot</dd></div>
+      <div class="kv" style="border:0"><dt>PDF files</dt><dd>
+        <a href="#/records?batch=${b}&fstatus=updated" data-close-summary><span class="pill info plain">Updated ${fmtN(c.updated_files)}</span></a>
+        <a href="#/records?batch=${b}&fstatus=deleted" data-close-summary><span class="pill bad plain">Deleted ${fmtN(c.deleted_files)}</span></a></dd></div>
       <div class="kv" style="border:0"><dt>VIN photos read by</dt><dd><span class="pill ok plain">Free ${fmtN(c.read_free)}</span> <span class="pill info plain">AI ${fmtN(c.read_ai)}</span></dd></div>
       <div class="row-actions" style="margin-top:8px">
         <button class="btn" data-sum-go="compare">Compare with reference</button>
@@ -532,6 +574,7 @@ async function openSummary(batchId) {
     if (n) tr.onclick = () => { close(); go(view_, params); };
   });
   $('[data-sum-go]', d).onclick = () => { close(); go('compare', { batch: b }); };
+  $$('[data-close-summary]', d).forEach((a) => { a.onclick = close; });
   $('[data-sum-export]', d).onclick = () => exportExcel(b);
   document.addEventListener('keydown', onKey);
   document.body.append(back, d);

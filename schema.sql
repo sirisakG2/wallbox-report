@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS records (
   date_confirmed    INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked the PDF and confirmed/corrected the date
   ocr_raw           TEXT NOT NULL DEFAULT '',
   notes             TEXT NOT NULL DEFAULT '',
+  file_status       TEXT NOT NULL DEFAULT '',  -- '' | updated (PDF changed in Drive, re-read) | deleted (PDF gone from Drive)
+  file_status_at    TEXT NOT NULL DEFAULT '',  -- when that status was detected
   updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_records_batch ON records(batch_id);
@@ -83,6 +85,9 @@ CREATE TABLE IF NOT EXISTS batch_files (
   file_id   TEXT NOT NULL,
   name      TEXT NOT NULL DEFAULT '',
   status    TEXT NOT NULL,   -- saved | duplicate | error
+  modified  TEXT NOT NULL DEFAULT '',     -- Drive last-modified of the version that was read (ISO)
+  size      INTEGER NOT NULL DEFAULT 0,   -- bytes of that version
+  processed_at TEXT NOT NULL DEFAULT '',  -- when it was read
   PRIMARY KEY (batch_id, file_id)
 );
 

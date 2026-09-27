@@ -1,5 +1,5 @@
 // Lists files of a public Google Drive folder (no API key) via the embedded folder view.
-import { bad, folderIdFromUrl, json } from '../../../lib/server.js';
+import { bad, folderIdFromUrl, json, labelToDate } from '../../../lib/server.js';
 
 function decodeEntities(s) {
   return s
@@ -21,15 +21,15 @@ export async function onRequestGet({ request }) {
 
   const title = decodeEntities((html.match(/<title>([^<]*)<\/title>/) || [])[1] || '').trim();
   const files = [];
-  const re = /<div class="flip-entry" id="entry-([A-Za-z0-9_-]+)"[\s\S]*?<a href="([^"]+)"[\s\S]*?<div class="flip-entry-title">([^<]*)<\/div>/g;
+  const re = /<div class="flip-entry" id="entry-([A-Za-z0-9_-]+)"[\s\S]*?<a href="([^"]+)"[\s\S]*?<div class="flip-entry-title">([^<]*)<\/div>[\s\S]*?<div class="flip-entry-last-modified"><div>([^<]*)<\/div>/g;
   let m;
   while ((m = re.exec(html))) {
-    const [, id, href, rawName] = m;
+    const [, id, href, rawName, label] = m;
     if (href.includes('/folders/')) continue; // sub-folders are not processed
     const name = decodeEntities(rawName).trim();
     const lower = name.toLowerCase();
     const type = lower.endsWith('.pdf') ? 'pdf' : /\.xlsx?$/.test(lower) ? 'xlsx' : 'other';
-    files.push({ id, name, type });
+    files.push({ id, name, type, modifiedDay: labelToDate(decodeEntities(label)) });
   }
   if (!files.length && !title) return bad('Folder not found or not shared publicly', 404);
   return json({ folderId, title, files });

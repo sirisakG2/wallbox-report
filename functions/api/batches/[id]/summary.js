@@ -20,7 +20,9 @@ export async function onRequestGet({ params, env }) {
       (SELECT COUNT(*) FROM batch_files f WHERE f.batch_id = ?1 AND f.status = 'error' AND EXISTS
          (SELECT 1 FROM issues i WHERE i.batch_id = ?1 AND i.pdf_file_id = f.file_id AND i.type = 'error' AND ${QUOTA})) AS failed_quota,
       (SELECT COUNT(*) FROM batch_files WHERE batch_id = ?1 AND status = 'duplicate') AS duplicates,
-      (SELECT COUNT(*) FROM batch_files WHERE batch_id = ?1) AS processed,
+      (SELECT COUNT(*) FROM batch_files WHERE batch_id = ?1 AND status != 'replaced') AS processed,
+      (SELECT COUNT(*) FROM records WHERE batch_id = ?1 AND file_status = 'updated') AS updated_files,
+      (SELECT COUNT(*) FROM records WHERE batch_id = ?1 AND file_status = 'deleted') AS deleted_files,
       (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND type = 'scanned_page') AS scanned,
       (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND type = 'missing_vin') AS missing_vin,
       (SELECT COUNT(*) FROM issues WHERE batch_id = ?1 AND type = 'bad_date') AS bad_date,
