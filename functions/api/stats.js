@@ -27,6 +27,8 @@ export async function onRequestGet({ env }) {
     to_review: scored.filter(needsReview).length,
     full_conf: scored.filter((r) => r.vin_level === 1 && r.date_conf === 100).length,
     vin_levels, excel,
+    date_wrong_month: scored.filter((r) => r.date_month_ok === false).length,
+    date_missing: scored.filter((r) => !r.install_date).length,
     baseline: { ...base.facets, pdfonly: base.pdfOnly.length, excel_rows: base.rows.length },
     byInstallMonth: [...byMonth].sort().map(([ym, n]) => ({ ym, n })),
   });

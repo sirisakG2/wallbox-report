@@ -87,7 +87,39 @@ export const EXCEL_PROBLEM_INFO = {
     action_th: 'ตรวจว่างานนี้เป็นของเดือนไหน ย้าย PDF ไปโฟลเดอร์เดือนที่ถูกต้อง หรือแก้ Excel',
   },
 };
+EXCEL_PROBLEM_INFO.excel_date_wrong_month = {
+  name: 'Excel date not in folder month', th: 'วันที่ใน Excel ไม่ตรงเดือนของโฟลเดอร์', tone: 'bad', sheet: 'Excel date wrong month',
+  meaning: 'The installation date in the Excel row is in a different month than the folder (e.g. a May date in the June Excel).',
+  meaning_th: 'วันที่ติดตั้งในแถว Excel อยู่คนละเดือนกับโฟลเดอร์ (เช่น วันที่เดือนพฤษภาคมใน Excel เดือนมิถุนายน)',
+  why: 'The installation may be billed in the wrong month.',
+  why_th: 'อาจเบิกงานผิดเดือน',
+  action: 'Check the real installation date in the PDF. Fix the date in the Excel, or move the row to the right month\'s Excel.',
+  action_th: 'ตรวจวันที่ติดตั้งจริงใน PDF แก้วันที่ใน Excel หรือย้ายแถวไปไว้ใน Excel ของเดือนที่ถูกต้อง',
+};
 export const EXCEL_PROBLEM_TYPES = Object.keys(EXCEL_PROBLEM_INFO);
+
+// Installation-date rules checked live on the PDF data (source ① Check PDF).
+export const DATE_PROBLEM_INFO = {
+  date_wrong_month: {
+    name: 'Install date not in folder month', th: 'วันที่ติดตั้งไม่ตรงเดือนของโฟลเดอร์', tone: 'bad', sheet: 'Date not in month',
+    meaning: 'The installation date in the PDF is in a different month than the folder it was imported from (e.g. a May date in the June folder).',
+    meaning_th: 'วันที่ติดตั้งใน PDF อยู่คนละเดือนกับโฟลเดอร์ที่นำเข้า (เช่น วันที่เดือนพฤษภาคมในโฟลเดอร์เดือนมิถุนายน)',
+    why: 'The installation may be billed in the wrong month, or the date in the report is wrong.',
+    why_th: 'อาจเบิกงานผิดเดือน หรือวันที่ในรายงานผิด',
+    action: 'Open the PDF and check the date. Wrong date → "Edit date". Right date → the PDF belongs to another month\'s folder (move it) — or confirm it if it is billed in this month on purpose.',
+    action_th: 'เปิด PDF ตรวจวันที่ ถ้าวันที่ผิดให้กด "Edit date" ถ้าวันที่ถูก แสดงว่า PDF ควรอยู่โฟลเดอร์เดือนอื่น (ย้ายไฟล์) หรือกด Confirm date ถ้าตั้งใจเบิกในเดือนนี้',
+  },
+  date_missing: {
+    name: 'No installation date', th: 'ไม่มีวันที่ติดตั้ง', tone: 'bad', sheet: 'No date',
+    meaning: 'No installation date could be read from the PDF.',
+    meaning_th: 'อ่านวันที่ติดตั้งจาก PDF ไม่ได้',
+    why: 'The installation cannot be placed in a billing month.',
+    why_th: 'ไม่สามารถระบุเดือนที่เบิกได้',
+    action: 'Open the PDF, find the installation date and enter it with "Edit date".',
+    action_th: 'เปิด PDF หาวันที่ติดตั้ง แล้วใส่ด้วยปุ่ม "Edit date"',
+  },
+};
+export const DATE_PROBLEM_TYPES = Object.keys(DATE_PROBLEM_INFO);
 
 export const PROBLEM_TYPES = Object.keys(PROBLEM_INFO);
 

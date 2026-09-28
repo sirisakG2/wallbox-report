@@ -79,6 +79,19 @@
 | Other problems | จำนวนปัญหาอื่นที่ยังเปิดอยู่ |
 | Imported months | การ์ดแต่ละเดือน: จำนวน Records, PDFs, VIN ✘, Problems, ความคืบหน้า และปุ่ม Summary / All PDFs / Check PDF / Check Excel / Other problems / Excel |
 | Installations by install date | กราฟจำนวนงานตามเดือนที่ติดตั้ง |
+| **⚠ Installation date** (กล่องแดง) | จำนวน PDF ที่วันที่ติดตั้ง**ไม่อยู่ในเดือนของโฟลเดอร์** และที่**อ่านวันที่ไม่ได้** แยกตามเดือน คลิกเพื่อเปิดรายการ (ดูหัวข้อ 4.1) · การ์ดเดือนแสดง "Date ≠ month" |
+
+### 4.1 กฎวันที่ติดตั้ง — ต้องอยู่ในเดือนของโฟลเดอร์
+
+วันที่ติดตั้งเป็นข้อมูลสำคัญสำหรับการเบิกจ่าย ทุกงานในโฟลเดอร์ของเดือนใดต้องมีวันที่ติดตั้ง**อยู่ในเดือนนั้น** เช่น โฟลเดอร์ 2026-06 ต้องเป็นวันที่ 1–30 มิ.ย. 2026 เท่านั้น ระบบตรวจทั้งวันที่ใน **PDF** และวันที่ใน **Excel**
+
+| ปัญหา | แหล่ง | แสดงที่ | ต้องทำอะไร |
+|---|---|---|---|
+| **Date not in folder month** | ① PDF | Dashboard, ① Check PDF (คอลัมน์ Installed สีแดง), All PDFs (ตัวกรอง Install date), Other problems ①, หน้าต่างรายละเอียด (แถบแดง) | เปิด PDF ตรวจวันที่ ถ้าอ่านผิดกด **Edit date** ถ้าวันที่ถูกจริง (งานเดือนอื่นอยู่ผิดโฟลเดอร์ / ส่งเบิกล่าช้า) ติดต่อผู้รับเหมา หรือกด **Confirm date** เพื่อยอมรับ |
+| **No installation date** | ① PDF | เหมือนข้างบน | เปิด PDF แล้วกด **Edit date** ใส่วันที่ที่ถูกต้อง |
+| **Excel date not in folder month** | ② Excel | ② Check Excel (ชิป ⚠ และวันที่สีแดง), Other problems ② | แก้วันที่ในไฟล์ Excel ส่งเบิก หรือย้ายแถวไปเดือนที่ถูกต้อง |
+
+> ℹ️ วันที่ที่ผู้ดูแลกด **Confirm date** หรือ **Edit date** แล้ว จะไม่ถูกแจ้งซ้ำ (ถือว่าตรวจแล้ว) และบันทึกใน History ของรายการ · วันที่นอกเดือนจะลดความมั่นใจของวันที่ลง 25% และทำให้รายการอยู่ใน **Needs review**
 
 ## 5. ① Check PDF — ชื่อไฟล์ ↔ ข้อมูลใน PDF
 
@@ -101,7 +114,7 @@
 ### หน้าจอ
 
 - **Month** เลือกเดือน, ชิป **All / ① / ② / ③** กรองผล (ตัวเลขคือจำนวน)
-- คอลัมน์: Month · VIN in file name · VIN photo (แดงถ้าไม่ตรง) · Paper VIN box (ส้มถ้าไม่ตรง) · Result · Read by (Free/AI) · Customer · ลิงก์ PDF
+- คอลัมน์: Month · VIN in file name · VIN photo (แดงถ้าไม่ตรง) · Paper VIN box (ส้มถ้าไม่ตรง) · Result · Read by (Free/AI) · Customer · **Installed** (แดงถ้าไม่อยู่ในเดือนของโฟลเดอร์หรือไม่มีวันที่) · ลิงก์ PDF
 - คลิกแถวเพื่อเปิดหน้าต่างรายละเอียด (ดูหัวข้อ 9)
 - ปุ่ม **Export Check 1** ส่งออกเฉพาะผลตรวจนี้ (ดูหัวข้อ 10.2)
 
@@ -280,6 +293,7 @@
 | Photo VIN / Paper VIN | VIN ที่อ่านจากรูป / จากช่องกระดาษ (แดง/ส้มถ้าไม่ตรง) |
 | Excel row / Excel name (col D) | ชีตและแถวใน Excel / ชื่อลูกค้าใน Excel |
 | Installation date / Date % | วันที่ติดตั้งจาก PDF / ความมั่นใจของวันที่ |
+| Date in folder month | ✔ = อยู่ในเดือนของโฟลเดอร์ · ✘ 2026-05 ≠ 2026-06 = อยู่เดือนอื่น · NO DATE = อ่านไม่ได้ (แดง พร้อมวันที่แดง) |
 | Needs review | Yes = ควรตรวจ |
 | VIN photo match / Read by | ✔✘ รูปตรงกับ VIN / อ่านด้วย free (ฟรี) หรือ ai |
 | Month · Job number · Charger / PO code · Customer name · Phone · Region · Site type · Charger serial · Report printed at · Job URL | ข้อมูลจากแบบฟอร์มหน้า 1 |
@@ -298,6 +312,7 @@
 | Result | ① Match 3/3 / ② File = Photo / ③ Not matched (สีเขียว/ส้ม/แดง) |
 | Photo read by | Free reader หรือ AI |
 | Why | เหตุผลของผล |
+| Installation date / Date in folder month | วันที่ติดตั้งจาก PDF / ✔ ✘ NO DATE (แดงถ้าไม่อยู่ในเดือนของโฟลเดอร์) |
 | Customer (PDF) · Job number · PDF file · PDF link | ข้อมูลอ้างอิงและลิงก์ |
 
 ### 10.3 ชีต Check 2 · Excel baseline (1 แถว = 1 แถวใน Excel)
@@ -313,12 +328,14 @@
 | Date (20) | ✔ = ตรง, "N days" = ต่างกัน N วัน |
 | % match | คะแนนรวม (เขียว ≥90, ส้ม 70–89, แดง <70) |
 | Customer (PDF) · Job no. (PDF) · Install date (PDF) · PDF link | ค่าจาก PDF เพื่อเทียบ |
+| Excel date in folder month / PDF date in folder month | ✔ หรือ ✘ (แดง) วันที่ใน Excel / PDF อยู่ในเดือนของโฟลเดอร์หรือไม่ |
 
 ### 10.4 ไฟล์ Other problems (Export detailed Excel)
 
 | ชีต | เนื้อหา |
 |---|---|
 | Read me | วิธีใช้ไฟล์ (ไทย/อังกฤษ) และตารางอธิบายทุกปัญหา: ความหมาย, ผลกระทบ, สิ่งที่ต้องทำ, จำนวน Open/Resolved, Source (①/②) |
+| ⚠ Install date | ปัญหาวันที่ทั้งหมด: ① PDF (ไม่อยู่ในเดือน / ไม่มีวันที่) และ ② Excel (วันที่ใน Excel ไม่อยู่ในเดือน) พร้อมเดือนโฟลเดอร์, เดือนของวันที่ (แดง), วันที่ PDF, ข้อความวันที่ใน PDF, วันที่ Excel, สิ่งที่ต้องทำ และลิงก์ |
 | All problems | ทุกปัญหา 1 แถวต่อปัญหา: Source · Problem · Status · Month · VIN · Customer · Job number · What happened · What to do · PDF file/link · Excel row/link · Found (UTC) |
 | Edited PDF | + Job at top of page · Job in table · Report printed · Install date |
 | Duplicate VIN | + ไฟล์ที่เก็บไว้ (ชื่อ, เดือน, ลิงก์, ลูกค้า) และไฟล์นี้ (ลูกค้า, วันที่, เลขงาน) |

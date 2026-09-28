@@ -39,6 +39,8 @@ export async function onRequestGet({ request, env }) {
       deleted_count: recs.filter((r) => r.file_status === 'deleted').length,
       updated_count: recs.filter((r) => r.file_status === 'updated').length,
       excel_problem_count: excelProblems,
+      date_wrong_month_count: recs.filter((r) => r.date_month_ok === false).length,
+      date_missing_count: recs.filter((r) => !r.install_date).length,
     };
   });
   return json({ batches: results, excel_problems: results.reduce((a2, x) => a2 + x.excel_problem_count, 0) });

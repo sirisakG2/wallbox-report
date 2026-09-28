@@ -4,7 +4,7 @@ import { MANUAL_TITLE, manualHtml } from './lib/manual-th.js';
 import { planFolder, runImport, suggestMonth } from './lib/importer.js';
 import { freeOcrStatus } from './lib/free-ocr.js';
 import { downloadProblemsWorkbook, downloadWorkbook } from './lib/report.js';
-import { EXCEL_PROBLEM_INFO, EXCEL_PROBLEM_TYPES, PROBLEM_INFO, PROBLEM_TYPES, whatHappened } from './lib/problems.js';
+import { DATE_PROBLEM_INFO, DATE_PROBLEM_TYPES, EXCEL_PROBLEM_INFO, EXCEL_PROBLEM_TYPES, PROBLEM_INFO, PROBLEM_TYPES, whatHappened } from './lib/problems.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -62,6 +62,14 @@ function dateMark(days) {
   if (days === 0) return '<span class="ok-mark" title="+20">✔</span>';
   if (days !== null && days <= 3) return `<span class="warn-mark" title="+10">${days}d</span>`;
   return days === null ? '<span class="faint">–</span>' : `<span class="bad-mark">${days}d</span>`;
+}
+// Installation date cell: red with "not <month>" when the date is not in the folder month.
+function dateCell(iso, raw, folderMonth, okFlag) {
+  if (!iso) return `<span class="pill bad">${esc(raw || 'no date')}</span>`;
+  const ok = okFlag !== undefined ? okFlag : folderMonth ? iso.slice(0, 7) === folderMonth : null;
+  return ok === false
+    ? `<span class="date-wrong" title="Installation month is not the folder month ${esc(fmtMonth(folderMonth, true))}">${esc(fmtDate(iso))}<small>not ${esc(fmtMonth(folderMonth))}</small></span>`
+    : esc(fmtDate(iso));
 }
 function fileStatusPill(r) {
   if (r.file_status === 'updated') return `<span class="pill info" title="PDF changed in Drive and was read again">Updated ${esc(fmtDate(r.file_status_at))}</span>`;
@@ -182,6 +190,12 @@ async function renderDashboard() {
       </div>
       <div class="legend" style="border-top:1px solid var(--border);border-bottom:0">${fmtN(s.baseline.excel_rows)} Excel rows · <a href="#/check-excel?band=pdfonly">${fmtN(s.baseline.pdfonly)} PDFs not in any Excel</a></div>
     </div>
+    <a class="card date-alert ${s.date_wrong_month + s.date_missing ? 'on' : ''}" href="#/records?datemonth=wrong" style="margin-bottom:16px">
+      <div><div class="label">Installation date not in the folder month</div>
+        <div class="sub">Every installation should be dated in the month of its folder (e.g. June folder → June date). Click to see them.</div></div>
+      <div class="da-num"><b>${fmtN(s.date_wrong_month)}</b><span>other month</span></div>
+      <div class="da-num"><b>${fmtN(s.date_missing)}</b><span>no date</span></div>
+    </a>
     <div class="grid cols-4">
       <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
       <a class="card kpi kpi-link" href="#/records?conf=review"><div class="label">To review</div><div class="value" style="color:${s.to_review ? 'var(--warn)' : 'inherit'}">${fmtN(s.to_review)}</div><div class="sub">VIN or date below 95% · ${fmtN(s.full_conf)} at 100%</div></a>
@@ -223,6 +237,7 @@ function monthCard(b) {
         <div class="stat"><b>${fmtN(b.pdf_count)}</b><span>PDFs</span></div>
         <div class="stat"><b style="color:${b.ocr_mismatch_count ? 'var(--bad)' : 'inherit'}">${fmtN(b.ocr_mismatch_count)}</b><span>VIN ✘</span></div>
         <div class="stat"><b style="color:${b.open_issue_count + (b.excel_problem_count || 0) ? 'var(--warn)' : 'inherit'}">${fmtN(b.open_issue_count + (b.excel_problem_count || 0))}</b><span>Problems</span></div>
+        <div class="stat" title="Installation date not in ${esc(fmtMonth(b.month, true))}"><b style="color:${b.date_wrong_month_count ? 'var(--bad)' : 'inherit'}">${fmtN(b.date_wrong_month_count || 0)}</b><span>Date ≠ month</span></div>
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-3);margin-bottom:6px"><span>Processed ${fmtN(b.processed_count)} / ${fmtN(b.pdf_count)}${b.updated_count ? ` · <span style="color:var(--info)">${fmtN(b.updated_count)} updated</span>` : ''}${b.deleted_count ? ` · <span style="color:var(--bad)">${fmtN(b.deleted_count)} deleted</span>` : ''}</span><span>Reference match ${b.reference_count ? pct(b.matched_count, b.reference_count) : 0}%</span></div>
@@ -492,7 +507,7 @@ async function renderCheckPdf(params) {
       <div class="legend"><span>${vinLevelPill(1)} file name = photo = paper</span><span>${vinLevelPill(2)} photo confirms file name, paper box differs</span><span>${vinLevelPill(3)} photo does not confirm file name → open the PDF</span></div>
       <div class="table-wrap">
         ${data.records.length ? `<table>
-          <thead><tr><th>Month</th><th>VIN in file name</th><th>VIN photo</th><th>Paper VIN box</th><th>Result</th><th>Read by</th><th>Customer</th><th></th></tr></thead>
+          <thead><tr><th>Month</th><th>VIN in file name</th><th>VIN photo</th><th>Paper VIN box</th><th>Result</th><th>Read by</th><th>Installed</th><th>Customer</th><th></th></tr></thead>
           <tbody>${data.records.map((r, i) => `
             <tr class="clickable" data-i="${i}">
               <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td>
@@ -501,6 +516,7 @@ async function renderCheckPdf(params) {
               <td class="mono ${r.paper_vin !== r.file_vin ? 'warn-cell' : ''}">${esc(r.paper_vin) || '<span class="faint">–</span>'}</td>
               <td title="${esc(r.vin_conf_reasons.join(' · '))}">${vinLevelPill(r.vin_level)}</td>
               <td>${readByPill(r.vin_read_by)}</td>
+              <td class="num">${dateCell(r.install_date, r.install_date_raw, r.month, r.date_month_ok)}</td>
               <td>${esc(r.customer_name)}</td>
               <td style="white-space:nowrap"><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a></td>
             </tr>`).join('')}</tbody></table>` : '<div class="empty">Nothing here.</div>'}
@@ -521,7 +537,8 @@ async function renderCheckExcel(params) {
   const monthExcel = state.batches.find((b) => String(b.id) === String(batch));
   const chips = checkChips('check-excel', params, 'band', [
     ['full', '100%', f.full, 'ok'], ['high', '90–99%', f.high, 'ok'], ['medium', '70–89%', f.medium, 'warn'], ['low', 'Below 70%', f.low, 'bad'],
-    ['nopdf', 'Excel row · no PDF', f.nopdf, 'bad'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info']], null, f.excel_rows);
+    ['nopdf', 'Excel row · no PDF', f.nopdf, 'bad'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info'],
+    ['wrongmonth', '⚠ Date not in folder month', f.wrongmonth, 'bad']], null, f.excel_rows);
   let table;
   if (band === 'pdfonly') {
     table = data.rows.length ? `<table>
@@ -548,7 +565,7 @@ async function renderCheckExcel(params) {
           <td class="mono">${esc(x.vin)}</td>
           <td>${esc(x.customer_name)}${r && pt.name < 95 ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.customer_name)}</div>` : ''}</td>
           <td class="mono">${esc(x.case_number)}${r && !pt.case ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.job_number) || '–'}</div>` : ''}</td>
-          <td class="num">${esc(fmtDate(x.install_date))}${r && pt.date_days ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(fmtDate(r.install_date)) || '–'}</div>` : ''}</td>
+          <td class="num">${dateCell(x.install_date, '', x.month, x.excel_month_ok)}${r && (pt.date_days || x.pdf_month_ok === false) ? `<div class="faint" style="font-size:11.5px">PDF: ${dateCell(r.install_date, r.install_date_raw, x.month, x.pdf_month_ok)}</div>` : ''}</td>
           ${r ? `<td>${tick(pt.vin_file, 15)}</td><td>${tick(pt.vin_photo, 15)}</td><td>${tick(pt.vin_paper, 10)}</td>
             <td class="num ${pt.name >= 95 ? 'ok-mark' : pt.name >= 80 ? 'warn-mark' : 'bad-mark'}">${pt.name}%</td>
             <td>${tick(pt.case, 15)}</td><td>${dateMark(pt.date_days)}</td>`
@@ -560,7 +577,7 @@ async function renderCheckExcel(params) {
   }
   view.innerHTML = `
     <div class="view-head"><div><h1><span class="tab-num big">2</span> Check Excel</h1>
-      <p>Each <b>Excel row</b> (row, VIN, customer, case number, install date) is the baseline. The app finds the PDF with the same VIN and checks every field. <b>% match</b> = VIN in file name 15 + photo 15 + paper 10 + name 25 + case number 15 + date 20.</p></div>
+      <p>Each <b>Excel row</b> (row, VIN, customer, case number, install date) is the baseline. The app finds the PDF with the same VIN and checks every field. <b>% match</b> = VIN in file name 15 + photo 15 + paper 10 + name 25 + case number 15 + date 20. <span class="date-wrong-inline">Red date</span> = installation month is not the folder month.</p></div>
       <div class="row-actions">
         ${monthExcel?.reference_file_id ? `<a class="btn" href="${excelUrl(monthExcel.reference_file_id)}" target="_blank" rel="noopener">Open ${esc(fmtMonth(monthExcel.month))} Excel ${ICON.ext}</a>` : ''}
         <button class="btn" data-export="${esc(batch)}" data-kind="check2">${ICON.download} Export Check 2</button></div></div>
@@ -614,7 +631,7 @@ async function renderMonthsImport(params) {
 async function renderRecords(params) {
   const page = Number(params.get('page')) || 1;
   const q = new URLSearchParams({ page, size: 50 });
-  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus', 'vinlevel', 'excel', 'xlband']) if (params.get(k)) q.set(k, params.get(k));
+  for (const k of ['batch', 'q', 'match', 'from', 'to', 'conf', 'fstatus', 'vinlevel', 'excel', 'xlband', 'datemonth']) if (params.get(k)) q.set(k, params.get(k));
   const data = await api(`/api/records?${q}`);
   state.lastRecords = data.records;
   state.reviewMode = params.get('conf') === 'review';
@@ -629,6 +646,9 @@ async function renderRecords(params) {
         <div class="field grow"><label>Search</label><input class="input" name="q" placeholder="VIN, name, job number, serial, phone…" value="${esc(params.get('q') || '')}"></div>
         <div class="field"><label>Confidence</label><select class="select" name="conf">
           ${[['', 'All'], ['review', 'Needs review (<95%)'], ['full', '100% only']].map(([v, l]) => `<option value="${v}" ${(params.get('conf') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Install date</label><select class="select" name="datemonth">
+          ${[['', 'All'], ['wrong', '⚠ Not in folder month'], ['missing', 'No date']].map(([v, l]) => `<option value="${v}" ${(params.get('datemonth') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
         <div class="field"><label>PDF file</label><select class="select" name="fstatus">
           ${[['', 'All'], ['updated', 'Updated'], ['deleted', 'Deleted']].map(([v, l]) => `<option value="${v}" ${(params.get('fstatus') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
@@ -655,7 +675,7 @@ async function renderRecords(params) {
               <td>${matchPct(r.xl_score, r.xl_band)}</td>
               <td class="mono ${r.vin_picture && r.vin_picture !== r.file_vin ? 'bad-cell' : ''}">${esc(r.vin_picture) || '<span class="faint">not read</span>'}</td>
               <td class="mono ${r.paper_vin !== r.file_vin ? 'warn-cell' : ''}">${esc(r.paper_vin) || '<span class="faint">–</span>'}</td>
-              <td class="num">${esc(fmtDate(r.install_date)) || `<span class="pill bad">${esc(r.install_date_raw || 'missing')}</span>`}</td>
+              <td class="num">${dateCell(r.install_date, r.install_date_raw, r.month, r.date_month_ok)}</td>
               <td title="${esc(r.date_conf_reasons.join(' · '))}">${confPill(r.date_conf)}</td>
               <td class="mono">${esc(r.job_number)}</td>
               <td>${esc(r.customer_name)}</td>
@@ -680,6 +700,7 @@ async function renderRecords(params) {
   f.xlband.onchange = () => go('records', current());
   f.conf.onchange = () => go('records', current());
   f.fstatus.onchange = () => go('records', current());
+  f.datemonth.onchange = () => go('records', current());
   $('#clearF').onclick = () => go('records');
   $('#prevP').onclick = () => go('records', { ...current(), page: page - 1 });
   $('#nextP').onclick = () => go('records', { ...current(), page: page + 1 });
@@ -726,7 +747,9 @@ function openRecord(r) {
         </div>
         <div class="review-box">
           <div class="review-head"><span>Installation date</span>${confPill(r.date_conf, true)}</div>
-          <div class="review-value">${esc(fmtDate(r.install_date)) || '<span class="pill bad">unreadable</span>'} <span class="faint">PDF: ${esc(r.install_date_raw) || '–'}</span></div>
+          <div class="review-value">${dateCell(r.install_date, 'unreadable', r.month, r.date_month_ok)} <span class="faint">PDF: ${esc(r.install_date_raw) || '–'}</span></div>
+          ${r.date_month_ok === false ? `<div class="date-banner">⚠ Installation month ${esc(fmtMonth(r.install_date.slice(0, 7), true))} is not the folder month ${esc(fmtMonth(r.month, true))}. Check the date in the PDF / Excel, or whether the PDF is in the right month's folder.</div>` : ''}
+          ${!r.install_date ? '<div class="date-banner">⚠ No installation date could be read — enter it with Edit date.</div>' : ''}
           ${reasons(r.date_conf_reasons)}
           <div class="row-actions">
             ${r.date_confirmed || !r.install_date ? '' : `<button class="btn sm" data-confirm-date="${esc(r.vin)}">✔ Confirm date</button>`}
@@ -843,6 +866,9 @@ async function openSummary(batchId) {
           </tr>`).join('')}</tbody>
       </table>
       <div class="kv" style="border:0;margin-top:10px"><dt>Other checks</dt><dd class="muted">${fmtN(c.missing_vin)} VIN taken from file name · ${fmtN(c.bad_date)} unreadable dates · ${fmtN(c.charger_photo)} charger photo in VIN slot</dd></div>
+      <div class="kv" style="border:0"><dt>Install date</dt><dd>
+        <a href="#/records?batch=${b}&datemonth=wrong" data-close-summary><span class="pill ${c.date_wrong_month ? 'bad' : 'ok'} plain">Not in ${esc(fmtMonth(batch.month))}: ${fmtN(c.date_wrong_month)}</span></a>
+        <a href="#/records?batch=${b}&datemonth=missing" data-close-summary><span class="pill ${c.date_missing ? 'bad' : 'ok'} plain">No date: ${fmtN(c.date_missing)}</span></a></dd></div>
       <div class="kv" style="border:0"><dt>Excel check</dt><dd>
         <a href="#/records?batch=${b}&excel=match" data-close-summary>${excelPill('match', 0, false)} ${fmtN(c.xl_match)}</a> &nbsp;
         <a href="#/records?batch=${b}&excel=close" data-close-summary>${excelPill('close', 0, false)} ${fmtN(c.xl_close)}</a> &nbsp;
@@ -927,20 +953,37 @@ async function renderIssues(params) {
   const text = params.get('q') || '';
   const showResolved = params.get('resolved') === 'all';
   const isExcelType = EXCEL_PROBLEM_TYPES.includes(type);
+  const isDateType = DATE_PROBLEM_TYPES.includes(type);
   const q = new URLSearchParams();
   if (batch) q.set('batch', batch);
   if (type && !isExcelType) q.set('type', type); else q.set('scope', 'other');
   if (text) q.set('q', text);
   if (!showResolved) q.set('resolved', '0');
-  const [{ issues: pdfAll }, { issues: openAll }, { problems: excelAll }] = await Promise.all([
+  const bq = batch ? `batch=${batch}&` : '';
+  const [{ issues: pdfAll }, { issues: openAll }, { problems: excelBase }, { records: wrongRecs }, { records: noDateRecs }, { rows: xlWrong }] = await Promise.all([
     api(`/api/issues?${q}`),
-    api(`/api/issues?${batch ? `batch=${batch}&` : ''}scope=other&resolved=0`),
+    api(`/api/issues?${bq}scope=other&resolved=0`),
     api(`/api/excel-problems${batch ? `?batch=${batch}` : ''}`),
+    api(`/api/records?${bq}datemonth=wrong&size=all`),
+    api(`/api/records?${bq}datemonth=missing&size=all`),
+    api(`/api/baseline?${bq}band=wrongmonth&size=all`),
   ]);
-  const pdfIssues = isExcelType ? [] : pdfAll;
+  // Installation-date problems (live): PDF date not in folder month / no date; Excel date not in folder month.
+  const dateRows = [
+    ...wrongRecs.map((r) => ({ type: 'date_wrong_month', rec: r, what: `Installed ${fmtDate(r.install_date)} (${fmtMonth(r.install_date.slice(0, 7), true)}) — folder month is ${fmtMonth(r.month, true)}` })),
+    ...noDateRecs.map((r) => ({ type: 'date_missing', rec: r, what: `No date could be read (PDF text: "${r.install_date_raw || '–'}")` })),
+  ];
+  const excelAll = [...excelBase, ...xlWrong.filter((x) => x.excel_month_ok === false).map((x) => ({
+    type: 'excel_date_wrong_month', month: x.month, batch_id: x.batch_id, sheet_name: x.sheet_name, row_no: x.row_no, excel_file_id: x.excel_file_id,
+    excel_vin: x.vin, customer_name: x.customer_name, suggestion: x.record ? { ...x.record, how: `PDF date ${fmtDate(x.record.install_date) || '–'}` } : null,
+    detail: `Excel row ${x.row_no}: date ${fmtDate(x.install_date)} is not in ${fmtMonth(x.month, true)}`, excel_date: x.install_date,
+  }))];
+  const pdfIssues = isExcelType || isDateType ? [] : pdfAll;
+  const dateList = type && !isDateType ? [] : dateRows.filter((d) => !type || d.type === type);
   const excelList = type && !isExcelType ? [] : excelAll.filter((x) => !type || x.type === type);
-  const info = (t) => PROBLEM_INFO[t] || EXCEL_PROBLEM_INFO[t] || { name: (ISSUE_LABEL[t] || [t])[0], th: '', tone: 'neutral', meaning: '', action: '' };
-  const count = (t) => (EXCEL_PROBLEM_TYPES.includes(t) ? excelAll.filter((x) => x.type === t).length : openAll.filter((i) => i.type === t).length);
+  const info = (t) => PROBLEM_INFO[t] || DATE_PROBLEM_INFO[t] || EXCEL_PROBLEM_INFO[t] || { name: (ISSUE_LABEL[t] || [t])[0], th: '', tone: 'neutral', meaning: '', action: '' };
+  const count = (t) => (EXCEL_PROBLEM_TYPES.includes(t) ? excelAll.filter((x) => x.type === t).length
+    : DATE_PROBLEM_TYPES.includes(t) ? dateRows.filter((d) => d.type === t).length : openAll.filter((i) => i.type === t).length);
   const card = (t) => `
     <button class="card problem-card ${type === t ? 'active' : ''} tone-${info(t).tone}" data-ptype="${t}">
       <div class="pc-head"><b>${esc(info(t).name)}</b><span class="pc-count">${fmtN(count(t))}</span></div>
@@ -948,7 +991,7 @@ async function renderIssues(params) {
       <div class="pc-text">${esc(info(t).meaning)}</div>
       <div class="pc-todo"><span>What to do</span>${esc(info(t).action)}</div>
     </button>`;
-  const pdfTotal = openAll.length;
+  const pdfTotal = openAll.length + dateRows.length;
   const excelTotal = excelAll.length;
 
   view.innerHTML = `
@@ -962,12 +1005,24 @@ async function renderIssues(params) {
     </div>
 
     <div class="src-head src-pdf"><span class="tab-num">1</span> From Check PDF <small>— found while reading the PDF files · ${fmtN(pdfTotal)} open</small></div>
-    <div class="problem-cards">${PROBLEM_TYPES.map(card).join('')}</div>
+    <div class="problem-cards">${[...DATE_PROBLEM_TYPES, ...PROBLEM_TYPES].map(card).join('')}</div>
     ${isExcelType ? '' : `<div class="card section-gap">
       <div class="table-wrap">
-        ${pdfIssues.length ? `<table>
+        ${pdfIssues.length + dateList.length ? `<table>
           <thead><tr><th>Problem</th><th>Month</th><th>VIN</th><th>What happened</th><th>What to do</th><th>PDF</th><th style="text-align:right">Action</th></tr></thead>
-          <tbody>${pdfIssues.map((i) => `
+          <tbody>${dateList.map((d) => `
+            <tr>
+              <td><span class="src-tag pdf">①</span> <span class="pill bad">${esc(info(d.type).name)}</span></td>
+              <td><span class="month-chip">${esc(fmtMonth(d.rec.month))}</span></td>
+              <td class="mono">${esc(d.rec.vin)}</td>
+              <td style="max-width:380px"><span class="date-wrong-inline">${esc(d.what)}</span></td>
+              <td style="max-width:320px" class="muted">${esc(info(d.type).action)}</td>
+              <td><a href="${pdfUrl(d.rec.pdf_file_id)}" target="_blank" rel="noopener">Open ${ICON.ext}</a></td>
+              <td style="text-align:right;white-space:nowrap">
+                <button class="btn sm" data-edit-date="${esc(d.rec.vin)}" data-current="${esc(d.rec.install_date || '')}">Edit date</button>
+                ${d.rec.install_date ? `<button class="btn sm" data-confirm-date="${esc(d.rec.vin)}">Confirm date</button>` : ''}
+              </td>
+            </tr>`).join('')}${pdfIssues.map((i) => `
             <tr style="${i.resolved ? 'opacity:.5' : ''}">
               <td><span class="src-tag pdf">①</span> <span class="pill ${info(i.type).tone}">${esc(info(i.type).name)}</span></td>
               <td><span class="month-chip">${esc(fmtMonth(i.month))}</span></td>
@@ -981,7 +1036,7 @@ async function renderIssues(params) {
               </td>
             </tr>`).join('')}</tbody></table>` : '<div class="empty">No problems from the PDFs here — nice.</div>'}
       </div>
-      <div class="pager"><span>${fmtN(pdfIssues.length)} problem${pdfIssues.length === 1 ? '' : 's'} from the PDFs</span></div>
+      <div class="pager"><span>${fmtN(pdfIssues.length + dateList.length)} problem${pdfIssues.length + dateList.length === 1 ? '' : 's'} from the PDFs</span></div>
     </div>`}
 
     <div class="src-head src-excel"><span class="tab-num">2</span> From Check Excel <small>— found in the submission Excel · ${fmtN(excelTotal)} to fix in the Excel</small></div>

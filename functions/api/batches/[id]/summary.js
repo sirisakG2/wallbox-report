@@ -40,6 +40,7 @@ export async function onRequestGet({ params, env }) {
   return json({
     batch,
     counts: { ...row, unread_other: row.unread_all - row.unread_quota, vin_l1: levels[1], vin_l2: levels[2], vin_l3: levels[3],
+      date_wrong_month: recs.filter((r) => r.date_month_ok === false).length, date_missing: recs.filter((r) => !r.install_date).length,
       xl_match: excel.match, xl_close: excel.close, xl_diff: excel.different, xl_missing: excel.missing },
     quotaReached: row.quota_hits > 0,
   });
