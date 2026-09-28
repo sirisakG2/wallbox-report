@@ -9,6 +9,9 @@ any month (or all) can be exported to Excel.
 (`@cf/meta/llama-4-scout-17b-16e-instruct` vision) · MuPDF WASM in the browser · ExcelJS.
 Auto-deploys from GitHub `main`.
 
+## Manual
+Thai user manual for every menu and every Excel report: [MANUAL_TH.md](MANUAL_TH.md) — same content as the in-app menu "📖 คู่มือ Manual". Edit `public/lib/manual-th.js`, then run `npm run manual` to regenerate the Markdown.
+
 ## How it works
 1. **Import month** — paste the Drive folder URL (shared as *Anyone with the link*). The app lists
    files, stores the reference Excel rows, then for every PDF:

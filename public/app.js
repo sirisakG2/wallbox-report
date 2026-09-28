@@ -1,5 +1,6 @@
 // Admin console: Dashboard · Import month · Records · Compare · Issues · Months · Export
 import { api } from './lib/api.js';
+import { MANUAL_TITLE, manualHtml } from './lib/manual-th.js';
 import { planFolder, runImport, suggestMonth } from './lib/importer.js';
 import { freeOcrStatus } from './lib/free-ocr.js';
 import { downloadProblemsWorkbook, downloadWorkbook } from './lib/report.js';
@@ -122,6 +123,7 @@ function go(name, params = {}) {
 const VIEWS = {
   dashboard: renderDashboard, import: renderMonthsImport, 'check-pdf': renderCheckPdf, 'check-excel': renderCheckExcel,
   records: renderRecords, compare: renderCompare, issues: renderIssues, months: renderMonthsImport, export: renderExport,
+  manual: renderManual,
 };
 
 async function route() {
@@ -579,6 +581,26 @@ async function renderCheckExcel(params) {
       if (rec) openRecord(rec);
     };
   });
+}
+
+// ---------- Manual (Thai) ----------
+function renderManual(params) {
+  const { toc, body } = manualHtml();
+  view.innerHTML = `
+    <div class="view-head"><div><h1>📖 คู่มือการใช้งาน</h1><p>${esc(MANUAL_TITLE)} — ทุกเมนู ขั้นตอนทำงาน และรายละเอียดรายงาน Excel ทุกไฟล์</p></div>
+      <div class="row-actions">
+        <a class="btn" href="https://github.com/sirisakG2/wallbox-report/blob/main/MANUAL_TH.md" target="_blank" rel="noopener">GitHub ${ICON.ext}</a>
+        <button class="btn" id="manPrint">พิมพ์ / PDF</button></div></div>
+    <div class="manual">
+      <nav class="manual-toc card">${toc}</nav>
+      <article class="manual-body card card-pad">${body}</article>
+    </div>`;
+  $('#manPrint').onclick = () => window.print();
+  $$('[data-manual-link]').forEach((a) => {
+    a.onclick = (e) => { e.preventDefault(); document.getElementById(`m-${a.dataset.manualLink}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  });
+  const sec = params.get('s');
+  if (sec) setTimeout(() => document.getElementById(`m-${sec}`)?.scrollIntoView({ block: 'start' }), 50);
 }
 
 // ---------- Months & Import (one page) ----------
