@@ -41,6 +41,8 @@ export async function onRequestGet({ request, env }) {
       excel_problem_count: excelProblems,
       date_wrong_month_count: recs.filter((r) => r.date_month_ok === false).length,
       date_missing_count: recs.filter((r) => !r.install_date).length,
+      // VIN photo not confirmed (level ③, not confirmed by admin, not a scanned page) — "Re-read not-matched photos".
+      vin_reread_count: recs.filter((r) => r.vin_level === 3 && !r.vin_confirmed && !r.scanned).length,
     };
   });
   return json({ batches: results, excel_problems: results.reduce((a2, x) => a2 + x.excel_problem_count, 0) });
@@ -76,5 +78,13 @@ export async function onRequestPost({ request, env }) {
       AND EXISTS (SELECT 1 FROM issues i WHERE i.batch_id = ?1 AND i.pdf_file_id = r.pdf_file_id
         AND i.type = 'ocr_failed' AND i.detail LIKE 'OCR failed:%')`)
     .bind(batch.id).all();
-  return json({ batch, doneFileIds: results.map((r) => r.file_id), retryFileIds: retry.map((r) => r.file_id) });
+  // Files whose VIN photo does not confirm the file name (unread or different) and no admin has confirmed —
+  // read again with the free reader first, AI only when it still cannot confirm. Scanned pages are skipped.
+  const { results: reread } = await env.DB.prepare(`
+    SELECT r.pdf_file_id AS file_id FROM records r WHERE r.batch_id = ?1 AND r.vin_confirmed = 0
+      AND (r.vin_picture = '' OR r.vin_picture <> r.vin)
+      AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.batch_id = ?1 AND i.pdf_file_id = r.pdf_file_id AND i.type = 'scanned_page')`)
+    .bind(batch.id).all();
+  return json({ batch, doneFileIds: results.map((r) => r.file_id), retryFileIds: retry.map((r) => r.file_id),
+    rereadFileIds: reread.map((r) => r.file_id) });
 }

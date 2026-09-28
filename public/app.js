@@ -279,6 +279,7 @@ function renderImport(params, box = view) {
         <div class="options">
           <label class="check"><input type="checkbox" id="optOcr" checked> Read VIN photo with AI</label>
           <label class="check" title="Files whose VIN photo was not read (e.g. AI allowance ran out) or that failed"><input type="checkbox" id="optRetry" checked> Retry unread / failed files</label>
+          <label class="check" id="optRereadBox" hidden title="Level ③ files not confirmed by an admin: the VIN photo was unread or differs from the file name. Read again with the free reader first, AI only when it still cannot confirm. Admin review is kept."><input type="checkbox" id="optReread"> Re-read VIN photos that are not matched <span class="faint" id="optRereadN"></span></label>
           <label class="check"><input type="checkbox" id="optReprocess"> Re-process all files</label>
           <label class="check">Test run — only first <input type="number" class="input" id="optLimit" min="0" value="0" style="width:74px;height:32px"> files <span class="faint">(0 = all)</span></label>
           <div style="flex:1"></div>
@@ -333,6 +334,9 @@ function renderImport(params, box = view) {
       $('#fMonth', el).value = existing?.month || suggestMonth(r.title);
       const ex = $('#fExisting', el);
       ex.hidden = !existing;
+      $('#optRereadBox', el).hidden = !existing?.vin_reread_count;
+      $('#optReread', el).checked = false;
+      $('#optRereadN', el).textContent = existing?.vin_reread_count ? `(${fmtN(existing.vin_reread_count)} files)` : '';
       if (existing) ex.innerHTML = `This folder was imported before as <strong>${esc(fmtMonth(existing.month, true))}</strong> — ${fmtN(existing.processed_count)} of ${fmtN(existing.pdf_count)} files processed. Starting again resumes with the remaining files${existing.processed_count ? ' and, with “Retry unread / failed”, re-reads unread VIN photos' : ''}.`;
       $('#folderBox', el).hidden = false;
       folder.plan = null;
@@ -409,6 +413,7 @@ function renderImport(params, box = view) {
         folder, month, plan: folder.plan,
         reprocess: $('#optReprocess', el).checked,
         retry: $('#optRetry', el).checked,
+        reread: $('#optReread', el).checked,
         ocr: $('#optOcr', el).checked,
         limit: Number($('#optLimit', el).value) || 0,
       }, ui, ctrl.signal);

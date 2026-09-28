@@ -327,11 +327,11 @@ export async function planFolder(pdfs, stored) {
 }
 
 // Runs a whole import. `ui` receives progress callbacks.
-export async function runImport({ folder, month, plan = null, reprocess = false, retry = false, ocr: useOcr = true, limit = 0, concurrency = 5 }, ui, signal) {
+export async function runImport({ folder, month, plan = null, reprocess = false, retry = false, reread = false, ocr: useOcr = true, limit = 0, concurrency = 5 }, ui, signal) {
   const pdfs = folder.files.filter((f) => f.type === 'pdf');
   const refFile = folder.refFile !== undefined ? folder.refFile : folder.files.find((f) => f.type === 'xlsx');
 
-  const { batch, doneFileIds, retryFileIds } = await api('/api/batches', {
+  const { batch, doneFileIds, retryFileIds, rereadFileIds = [] } = await api('/api/batches', {
     method: 'POST',
     body: { folderUrl: folder.url, month, folderName: folder.title, referenceName: refFile?.name || '', pdfCount: pdfs.length },
   });
@@ -358,6 +358,11 @@ export async function runImport({ folder, month, plan = null, reprocess = false,
     const ids = retryFileIds.filter((id) => inFolder.has(id));
     for (const id of ids) done.delete(id);
     ui.log(`Retrying ${ids.length} file(s) with an unread VIN photo or an error`);
+  }
+  if (reread && !reprocess) {
+    const ids = rereadFileIds.filter((id) => inFolder.has(id));
+    for (const id of ids) done.delete(id);
+    ui.log(`Re-reading ${ids.length} VIN photo(s) that did not match the file name — free reader first, AI only if needed`);
   }
   // Files changed in Drive since they were read.
   const updates = new Map((plan?.updated || []).map((u) => [u.file.id, u]));
