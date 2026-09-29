@@ -9,7 +9,7 @@
 - [3. การเข้าสู่ระบบและหน้าจอทั่วไป](#3-การเข้าสู่ระบบและหน้าจอทั่วไป)
 - [4. Dashboard](#4-dashboard)
 - [5. ① Check PDF — ชื่อไฟล์ ↔ ข้อมูลใน PDF](#5-①-check-pdf--ชื่อไฟล์--ข้อมูลใน-pdf)
-- [6. ② Check Excel — แถว Excel เป็นฐาน เทียบกับ PDF](#6-②-check-excel--แถว-excel-เป็นฐาน-เทียบกับ-pdf)
+- [6. ② Check Excel — Excel ของเดือนเป็นฐาน (VIN เป็นคีย์) เทียบกับ PDF ในโฟลเดอร์เดียวกัน](#6-②-check-excel--excel-ของเดือนเป็นฐาน-vin-เป็นคีย์-เทียบกับ-pdf-ในโฟลเดอร์เดียวกัน)
 - [7. Other problems — ปัญหาอื่น แยกตามที่มา](#7-other-problems--ปัญหาอื่น-แยกตามที่มา)
 - [8. Months & Import — นำเข้าเดือนและจัดการเดือน](#8-months--import--นำเข้าเดือนและจัดการเดือน)
 - [9. All PDFs และหน้าต่างรายละเอียด (ตรวจ/ยืนยัน/แก้ไข)](#9-all-pdfs-และหน้าต่างรายละเอียด-ตรวจยืนยันแก้ไข)
@@ -38,7 +38,7 @@
 |---|---|
 | Dashboard | ภาพรวมผลตรวจทุกเดือน (KPI ① และ ②) |
 | ① Check PDF | ผลตรวจ VIN: ชื่อไฟล์ ↔ รูปถ่าย ↔ ช่องกระดาษ |
-| ② Check Excel | ผลตรวจแถว Excel เทียบกับ PDF พร้อม % match |
+| ② Check Excel | แถว Excel (VIN เป็นคีย์) → PDF ในโฟลเดอร์ตามชื่อไฟล์ → VIN รูป → VIN กระดาษ |
 | Other problems | ปัญหาอื่นที่ตาราง ① และ ② ไม่แสดง แยกตามที่มา |
 | Months & Import | นำเข้าเดือนใหม่ และจัดการเดือนที่นำเข้าแล้ว |
 | All PDFs | รายการ PDF ทั้งหมด ค้นหา ตรวจทาน ยืนยัน/แก้ไข |
@@ -49,7 +49,7 @@
 1. เข้าเมนู **Months & Import** วาง URL โฟลเดอร์ Google Drive ของเดือน กด **Check folder** แล้วกด **Start import** (ถ้าติดโควต้า AI ให้ทำต่อหลัง 07:00 น.)
 2. เมื่อนำเข้าเสร็จ ระบบเปิด **Import summary** ให้ดูผลรวม
 3. ไปที่ **① Check PDF** เลือกเดือน กดดู **③ Not matched** เปิดแต่ละรายการตรวจรูปใน PDF แล้วกด **Photo shows this VIN** หรือ **Correct VIN**
-4. ไปที่ **② Check Excel** ดูแถวที่ % match ต่ำ และ **Excel row · no PDF** / **PDF · not in Excel** ตรวจกับ Excel และ PDF
+4. ไปที่ **② Check Excel** ดูแถว **③ File only** และ **No PDF file** / **PDF · not in Excel** ตรวจกับ Excel และ PDF
 5. ไปที่ **Other problems** ตรวจ PDF ที่อาจถูกแก้ไข, VIN ซ้ำ, หน้าสแกน และปัญหาใน Excel
 6. ใช้ **All PDFs → Confidence: Needs review** เป็นคิวงาน ตรวจจนหมด
 7. ส่งออก Excel: **Export Check 1**, **Export Check 2**, **Export detailed Excel** หรือ **Export all sheets**
@@ -72,9 +72,9 @@
 | ส่วน | ความหมาย |
 |---|---|
 | **① Check PDF** (3 กล่อง) | จำนวนและ % ของ PDF แต่ละระดับ ①②③ คลิกกล่องเพื่อเปิดรายการใน ① Check PDF |
-| **② Check Excel** (5 กล่อง) | จำนวนแถว Excel แยกตาม % match (100%, 90–99%, 70–89%, ต่ำกว่า 70%, ไม่มี PDF) และลิงก์ "PDFs not in any Excel" |
+| **② Check Excel** (4 กล่อง) | จำนวนแถว Excel แยกตามผล: ① Match 3/3, ② File + Photo, ③ File only, No PDF file และลิงก์ "PDFs not in any Excel" |
 | Records | จำนวน PDF (VIN ไม่ซ้ำ) และจำนวนเดือน |
-| To review | จำนวนรายการที่ต้องตรวจ (③, % match ต่ำกว่า 70% / ไม่อยู่ใน Excel, หรือวันที่ต่ำกว่า 95%) คลิกเพื่อเปิดคิวงาน |
+| To review | จำนวนรายการที่ต้องตรวจ (① ระดับ ③, ② ผล ③ File only / ไม่อยู่ใน Excel, หรือวันที่ต่ำกว่า 95%) คลิกเพื่อเปิดคิวงาน |
 | In reference Excel | สัดส่วนแถว Excel ที่มี PDF |
 | Other problems | จำนวนปัญหาอื่นที่ยังเปิดอยู่ |
 | Imported months | การ์ดแต่ละเดือน: จำนวน Records, PDFs, VIN ✘, Problems, ความคืบหน้า และปุ่ม Summary / All PDFs / Check PDF / Check Excel / Other problems / Excel |
@@ -120,38 +120,41 @@
 
 > ℹ️ ตัวอ่านรูปฟรี (PaddleOCR) ทำงานในเครื่องของผู้ใช้ ยืนยันได้ประมาณ 80% ของรูป ส่วนที่เหลือใช้ AI ของ Cloudflare ซึ่งมีโควต้าฟรีวันละ 10,000 neurons
 
-## 6. ② Check Excel — แถว Excel เป็นฐาน เทียบกับ PDF
+## 6. ② Check Excel — Excel ของเดือนเป็นฐาน (VIN เป็นคีย์) เทียบกับ PDF ในโฟลเดอร์เดียวกัน
 
-ทุกแถวใน Excel สรุปงานติดตั้ง (ชีตติดตั้ง) เป็น "ข้อมูลฐาน": **เลขแถว, VIN (คอลัมน์ H), ชื่อลูกค้า (คอลัมน์ D), เลขเคส (Case number), วันที่ติดตั้ง** ระบบหา PDF ที่มี VIN เดียวกัน (ชื่อไฟล์ → รูป → ช่องกระดาษ) แล้วเทียบทีละช่อง
+ไฟล์ **Excel สรุปงานติดตั้งในโฟลเดอร์ของเดือน** (ชีตติดตั้ง) เป็น "ข้อมูลฐาน" 1 แถว = 1 VIN (**VIN คอลัมน์ H เป็นคีย์หลัก**) ระบบตรวจแต่ละแถวตามลำดับความสำคัญ:
 
-### วิธีคิด % match (รวม 100)
+1. **หา PDF ในโฟลเดอร์เดียวกัน** ที่**ชื่อไฟล์**มี VIN เดียวกัน → เก็บเป็น **Found PDF file** (ชื่อไฟล์ + ลิงก์) ถ้าไม่พบ = **No PDF file**
+2. ใน PDF ที่พบ ตรวจว่า **VIN ในรูปถ่าย** และ **VIN ในช่องกระดาษ** ตรงกับ VIN ใน Excel หรือไม่
+3. **ชื่อลูกค้า** (คอลัมน์ D) และ **วันที่ติดตั้ง** — เทียบด้วย แต่ความสำคัญต่ำ · Case number แสดงเพื่อข้อมูล ไม่คิดคะแนน
 
-| ช่องใน Excel | เทียบกับข้อมูลใน PDF | คะแนน |
+### ผลการตรวจ (Result)
+
+| ผล | ความหมาย | ต้องทำอะไร |
 |---|---|---|
-| VIN | VIN ใน**ชื่อไฟล์** | 15 |
-| VIN | VIN ใน**รูปถ่าย** | 15 |
-| VIN | VIN ใน**ช่องกระดาษ** | 10 |
-| ชื่อลูกค้า | ชื่อลูกค้าใน PDF (คิดตามความเหมือน %; ชื่อที่ผู้ดูแลยืนยันแล้วได้เต็ม) | 25 |
-| Case number | เลขงาน (Job number) ใน PDF | 15 |
-| วันที่ติดตั้ง | วันที่ใน PDF: ตรงกัน 20 · ต่างไม่เกิน 3 วัน 10 · มากกว่านั้น 0 | 20 |
+| **① Match 3/3** (เขียว) | พบ PDF ตามชื่อไฟล์ · รูป ✔ · ช่องกระดาษ ✔ | ไม่ต้องทำอะไร |
+| **② File + Photo** (ส้ม) | พบ PDF · รูป ✔ · ช่องกระดาษต่าง/อ่านไม่ได้ | โดยทั่วไปถูกต้อง แจ้งช่างแก้แบบฟอร์มถ้าจำเป็น |
+| **③ File only** (แดง) | พบ PDF แต่รูปอ่านไม่ได้หรือเป็น VIN อื่น | เปิด PDF ดูรูป แล้วกด **Photo shows this VIN** หรือ **Correct VIN** |
+| **No PDF file** (แดง) | ไม่มี PDF ที่ชื่อไฟล์มี VIN นี้ในโฟลเดอร์ของเดือน | ดูหมายเหตุใต้ข้อความ: ระบบบอกถ้าพบ VIN นี้ใน**รูป/ช่องกระดาษ**ของ PDF อื่น (ชื่อไฟล์พิมพ์ผิด) หรือ PDF อยู่ใน**โฟลเดอร์เดือนอื่น** · ถ้าไม่มีเลย ให้ขอ PDF จากผู้รับเหมา |
+| PDF · not in Excel | PDF ในโฟลเดอร์ที่ไม่มีแถวใน Excel | ตรวจว่าลืมใส่ใน Excel หรือ VIN ใน Excel พิมพ์ผิด |
+
+### % match (รวม 100)
+
+| รายการ | คะแนน |
+|---|---|
+| VIN ในชื่อไฟล์ (พบ PDF) | 40 |
+| VIN ในรูปถ่าย | 30 |
+| VIN ในช่องกระดาษ | 15 |
+| ชื่อลูกค้า (ตามความเหมือน %; ชื่อที่ผู้ดูแลยืนยันแล้วได้เต็ม) | 10 |
+| วันที่ติดตั้ง: ตรงกัน 5 · ต่างไม่เกิน 3 วัน 2.5 | 5 |
 
 การเทียบชื่อ: ไม่สนใจคำนำหน้า (คุณ/นาย/นาง/นางสาว/น.ส.), เว้นวรรค, เครื่องหมาย, วรรณยุกต์ที่หายไป, "บ." = "บริษัท" และเทียบชื่อบุคคล/บริษัททีละส่วน
 
-### กลุ่มผลลัพธ์
-
-| กลุ่ม | ความหมาย |
-|---|---|
-| 100% | ทุกช่องตรง |
-| 90–99% | เกือบตรงทั้งหมด |
-| 70–89% | บางช่องต่าง — ควรตรวจ (ส่วนใหญ่เป็นวันที่ใน PDF ต่างจาก Excel) |
-| ต่ำกว่า 70% | หลายช่องต่าง — ต้องตรวจ |
-| Excel row · no PDF | แถวใน Excel ที่ไม่มี PDF ของ VIN นั้นในโฟลเดอร์ |
-| PDF · not in Excel | PDF ที่ไม่มีแถวใน Excel |
-
 ### หน้าจอ
 
-- ซ้าย: ข้อมูล Excel (เดือน, แถว, VIN, ลูกค้า, Case no., วันที่) — ขวา: ผลที่พบใน PDF (✔/✘ ต่อช่อง, % ชื่อ, วันที่ต่างกันกี่วัน) และ **Match %**
-- ถ้าช่องไม่ตรง จะแสดงค่าจาก PDF ใต้ค่าจาก Excel
+- ชิป **Result**: All / ① Match 3/3 / ② File + Photo / ③ File only / No PDF file / PDF · not in Excel / ⚠ Date not in folder month
+- คอลัมน์: Month · Row · **VIN (key)** · **Found PDF file** (คลิกเปิด PDF) · **Photo VIN** (✔ หรือค่าที่อ่านได้ สีแดง) · **Paper VIN** (✔ หรือค่าที่อ่านได้ สีส้ม) · **Result** · Customer · Install date · Name % · ลิงก์ Excel
+- ถ้าชื่อหรือวันที่ต่าง จะแสดงค่าจาก PDF ใต้ค่าจาก Excel · วันที่สีแดง = ไม่อยู่ในเดือนของโฟลเดอร์
 - ปุ่ม **Open <เดือน> Excel** เปิดไฟล์ Excel ใน Drive (เมื่อเลือกเดือน)
 - ปุ่ม **Export Check 2** (ดูหัวข้อ 10.3)
 
@@ -258,7 +261,7 @@
 - **Search**: ค้นหา VIN ชื่อ เลขงาน Serial เบอร์โทร
 - ตัวกรอง: Month, **Confidence** (All / **Needs review** / 100% only), **② Check Excel**, **① Check PDF**, **PDF file** (Updated/Deleted), ช่วงวันที่ติดตั้ง
 - คอลัมน์: Month · VIN (file name) · ① Check PDF · ② Check Excel · Photo VIN · Paper VIN · Installed · Date % · Job number · Customer · Serial · PDF
-- **Needs review** เรียงรายการที่ควรตรวจก่อน: ① ระดับ ③, ② ต่ำกว่า 70% หรือไม่อยู่ใน Excel, หรือวันที่ต่ำกว่า 95%
+- **Needs review** เรียงรายการที่ควรตรวจก่อน: ① ระดับ ③, ② ผล ③ File only หรือไม่อยู่ใน Excel, หรือวันที่ต่ำกว่า 95%
 - ปุ่ม **Export all sheets** (ดูหัวข้อ 10.1)
 
 ### หน้าต่างรายละเอียด (คลิกแถวใดก็ได้)
@@ -303,7 +306,7 @@
 |---|---|
 | VIN (file name, key) | VIN จากชื่อไฟล์ ใช้เป็นคีย์หลัก |
 | ① Check PDF | ผลตรวจ ①: 1 · Match 3/3 / 2 · File = Photo / 3 · Not matched |
-| ② Check Excel % | % match กับแถว Excel (หรือ Not in Excel) |
+| ② Check Excel / ② Check Excel % | ผล ① Match 3/3 / ② File + Photo / ③ File only (หรือ Not in Excel) และ % match |
 | Photo VIN / Paper VIN | VIN ที่อ่านจากรูป / จากช่องกระดาษ (แดง/ส้มถ้าไม่ตรง) |
 | Excel row / Excel name (col D) | ชีตและแถวใน Excel / ชื่อลูกค้าใน Excel |
 | Installation date / Date % | วันที่ติดตั้งจาก PDF / ความมั่นใจของวันที่ |
@@ -334,15 +337,17 @@
 | คอลัมน์ | ความหมาย |
 |---|---|
 | Month · Excel sheet · Excel row | ตำแหน่งแถวใน Excel |
-| VIN (Excel) · Customer (Excel) · Case no. (Excel) · Install date (Excel) | ข้อมูลฐานจาก Excel |
-| PDF found | Yes / No PDF |
-| VIN file (15) · VIN photo (15) · VIN paper (10) | ✔/✘ VIN ในชื่อไฟล์ / รูป / ช่องกระดาษ ตรงกับ Excel (ตัวเลขในวงเล็บคือคะแนน) |
-| Name % (25) | ความเหมือนของชื่อลูกค้า |
-| Case (15) | ✔/✘ Case number ตรงกับเลขงานใน PDF |
-| Date (20) | ✔ = ตรง, "N days" = ต่างกัน N วัน |
-| % match | คะแนนรวม (เขียว ≥90, ส้ม 70–89, แดง <70) |
-| Customer (PDF) · Job no. (PDF) · Install date (PDF) · PDF link | ค่าจาก PDF เพื่อเทียบ |
-| Excel date in folder month / PDF date in folder month | ✔ หรือ ✘ (แดง) วันที่ใน Excel / PDF อยู่ในเดือนของโฟลเดอร์หรือไม่ |
+| VIN (Excel, key) | VIN จาก Excel คอลัมน์ H — คีย์หลัก |
+| Result | ① Match 3/3 (เขียว) / ② File + Photo (ส้ม) / ③ File only / No PDF file (แดง) |
+| Found PDF file · PDF link | ชื่อไฟล์ PDF ในโฟลเดอร์เดียวกันที่ชื่อไฟล์มี VIN นี้ / ลิงก์ (แดงถ้าไม่พบ) |
+| VIN in photo · Photo = Excel VIN | VIN ที่อ่านจากรูป ((admin) = ผู้ดูแลยืนยันแล้ว) / ✔✘ (แดงถ้าไม่ตรง) |
+| VIN in paper box · Paper = Excel VIN | VIN ในช่องกระดาษ / ✔✘ (ส้มถ้าไม่ตรง) |
+| % match | ไฟล์ 40 + รูป 30 + กระดาษ 15 + ชื่อ 10 + วันที่ 5 |
+| Customer (Excel) · Customer (PDF) · Name % | ชื่อลูกค้าและความเหมือน (ความสำคัญต่ำ; ส้มถ้าต่ำกว่า 80%) |
+| Install date (Excel) · Install date (PDF) · Date diff | วันที่ติดตั้งและจำนวนวันที่ต่างกัน (ความสำคัญต่ำ) |
+| Excel date in folder month / PDF date in folder month | ✔ หรือ ✘ (แดง) วันที่อยู่ในเดือนของโฟลเดอร์หรือไม่ |
+| Case no. (Excel) · Job no. (PDF) | เพื่อข้อมูล ไม่คิดคะแนน |
+| Note | เมื่อไม่พบ PDF: บอกว่าพบ VIN นี้ในรูป/กระดาษของ PDF อื่น (ชื่อไฟล์ผิด) หรือ PDF อยู่ในเดือนอื่น |
 
 ### 10.4 ไฟล์ Other problems (Export detailed Excel)
 

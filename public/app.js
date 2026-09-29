@@ -51,11 +51,12 @@ function excelPill(status, score, withPct = true) {
   const [tone, label] = XL[status] || ['neutral', '–'];
   return `<span class="pill ${tone} plain lvl">${label}${withPct && status !== 'missing' ? ` ${score}%` : ''}</span>`;
 }
-const BAND = { full: ['ok', '100%'], high: ['ok', '90–99%'], medium: ['warn', '70–89%'], low: ['bad', 'Below 70%'], nopdf: ['bad', 'No PDF'], pdfonly: ['info', 'PDF not in Excel'], noexcel: ['bad', 'Not in Excel'] };
+// Check 2 result (lib/baseline.js): the PDF found by file name in the month folder, then its photo and paper VIN.
+const BAND = { l1: ['ok', '① Match 3/3'], l2: ['warn', '② File + Photo'], l3: ['bad', '③ File only'], nopdf: ['bad', 'No PDF file'], pdfonly: ['info', 'PDF not in Excel'], noexcel: ['bad', 'Not in Excel'] };
 function matchPct(score, band) {
   const [tone] = BAND[band] || ['neutral'];
-  if (band === 'nopdf' || band === 'noexcel') return `<span class="pill ${tone} plain lvl">${BAND[band][1]}</span>`;
-  return `<span class="pill ${tone} plain conf">${score}%</span>`;
+  if (band === 'nopdf' || band === 'noexcel' || !BAND[band]) return `<span class="pill ${tone} plain lvl">${BAND[band]?.[1] || '–'}</span>`;
+  return `<span class="pill ${tone} plain lvl">${BAND[band][1]} · ${score}%</span>`;
 }
 const tick = (ok, pts) => (ok ? `<span class="ok-mark" title="+${pts}">✔</span>` : '<span class="bad-mark">✘</span>');
 function dateMark(days) {
@@ -176,9 +177,9 @@ async function renderDashboard() {
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-head"><h2><span class="tab-num">2</span> Check Excel — Excel rows as baseline, looked up in the PDFs</h2><span class="faint">% match = VIN (file · photo · paper) + name + case number + date</span></div>
-      <div class="grid cols-5 card-pad">
-        ${[['full', 'Everything matches'], ['high', 'Nearly everything matches'], ['medium', 'Some fields differ — check'], ['low', 'Many fields differ'], ['nopdf', 'Excel row with no PDF']].map(([k, desc]) => {
+      <div class="card-head"><h2><span class="tab-num">2</span> Check Excel — Excel rows as baseline, looked up in the PDFs</h2><span class="faint">Excel VIN → PDF file name in the month folder → photo VIN → paper VIN (name &amp; date low priority)</span></div>
+      <div class="grid cols-4 card-pad">
+        ${[['l1', 'PDF found · photo and paper show the Excel VIN'], ['l2', 'PDF found · photo ✔ · paper VIN differs'], ['l3', 'PDF found · photo not read or different — check'], ['nopdf', 'No PDF file with this VIN in the month folder']].map(([k, desc]) => {
           const n = s.baseline[k];
           const tone = BAND[k][0];
           return `<a class="card kpi kpi-link level-card ${tone}" href="#/check-excel?band=${k}" style="box-shadow:none;background:var(--surface-2)">
@@ -541,8 +542,8 @@ async function renderCheckExcel(params) {
   const f = data.facets;
   const monthExcel = state.batches.find((b) => String(b.id) === String(batch));
   const chips = checkChips('check-excel', params, 'band', [
-    ['full', '100%', f.full, 'ok'], ['high', '90–99%', f.high, 'ok'], ['medium', '70–89%', f.medium, 'warn'], ['low', 'Below 70%', f.low, 'bad'],
-    ['nopdf', 'Excel row · no PDF', f.nopdf, 'bad'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info'],
+    ['l1', '① Match 3/3', f.l1, 'ok'], ['l2', '② File + Photo', f.l2, 'warn'], ['l3', '③ File only', f.l3, 'bad'],
+    ['nopdf', 'No PDF file', f.nopdf, 'bad'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info'],
     ['wrongmonth', '⚠ Date not in folder month', f.wrongmonth, 'bad']], null, f.excel_rows);
   let table;
   if (band === 'pdfonly') {
@@ -556,40 +557,40 @@ async function renderCheckExcel(params) {
   } else {
     table = data.rows.length ? `<table class="baseline">
       <thead>
-        <tr class="group"><th colspan="6">Excel (baseline)</th><th colspan="7">Found in PDF (Check 1 data)</th><th></th></tr>
-        <tr><th>Month</th><th>Row</th><th>VIN</th><th>Customer</th><th>Case no.</th><th>Install date</th>
-          <th title="VIN in PDF file name (15)">File</th><th title="VIN in PDF photo (15)">Photo</th><th title="VIN in paper box (10)">Paper</th>
-          <th title="Customer name similarity (25)">Name</th><th title="Case number = PDF job number (15)">Case</th><th title="Same date 20 · ≤3 days 10">Date</th>
-          <th>Match</th><th></th></tr></thead>
+        <tr class="group"><th colspan="3">Excel (baseline)</th><th colspan="4">① VIN — PDF in the month folder (high priority)</th><th colspan="3">② Name · date (low priority)</th><th></th></tr>
+        <tr><th>Month</th><th>Row</th><th>VIN (key)</th>
+          <th>Found PDF file</th><th>Photo VIN</th><th>Paper VIN</th><th>Result</th>
+          <th>Customer</th><th>Install date</th><th title="Customer name similarity">Name</th><th></th></tr></thead>
       <tbody>${data.rows.map((x) => {
         const r = x.record;
         const pt = x.parts;
+        const photo = r ? (r.vin_confirmed ? (r.file_vin || r.vin) : r.vin_picture) : '';
         return `<tr class="${r ? 'clickable' : ''}" data-vin="${esc(r?.vin || '')}">
           <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
           <td class="num faint">${esc(x.row_no)}</td>
           <td class="mono">${esc(x.vin)}</td>
-          <td>${esc(x.customer_name)}${r && pt.name < 95 ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.customer_name)}</div>` : ''}</td>
-          <td class="mono">${esc(x.case_number)}${r && !pt.case ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.job_number) || '–'}</div>` : ''}</td>
-          <td class="num">${dateCell(x.install_date, '', x.month, x.excel_month_ok)}${r && (pt.date_days || x.pdf_month_ok === false) ? `<div class="faint" style="font-size:11.5px">PDF: ${dateCell(r.install_date, r.install_date_raw, x.month, x.pdf_month_ok)}</div>` : ''}</td>
-          ${r ? `<td>${tick(pt.vin_file, 15)}</td><td>${tick(pt.vin_photo, 15)}</td><td>${tick(pt.vin_paper, 10)}</td>
-            <td class="num ${pt.name >= 95 ? 'ok-mark' : pt.name >= 80 ? 'warn-mark' : 'bad-mark'}">${pt.name}%</td>
-            <td>${tick(pt.case, 15)}</td><td>${dateMark(pt.date_days)}</td>`
-            : '<td colspan="6"><span class="faint">No PDF with this VIN</span></td>'}
+          ${r ? `<td style="max-width:260px"><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${esc(r.pdf_name)}">${esc(r.pdf_name.length > 38 ? `${r.pdf_name.slice(0, 38)}…` : r.pdf_name)} ${ICON.ext}</a></td>
+            <td class="mono ${pt.vin_photo ? '' : 'bad-mark'}">${pt.vin_photo ? '✔' : esc(photo || 'not read')}${r.vin_confirmed ? ' <span class="faint">(admin)</span>' : ''}</td>
+            <td class="mono ${pt.vin_paper ? '' : 'warn-mark'}">${pt.vin_paper ? '✔' : esc(r.paper_vin || 'not readable')}</td>`
+            : `<td colspan="3"><span class="bad-mark">No PDF file with this VIN in the folder</span>${x.hint ? `<div class="faint" style="font-size:11.5px">${esc(x.hint)}</div>` : ''}</td>`}
           <td>${matchPct(x.score, x.band)}</td>
-          <td style="white-space:nowrap">${r ? `<a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a> · ` : ''}${x.excel_file_id ? `<a href="${excelUrl(x.excel_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Excel ${ICON.ext}</a>` : ''}</td>
+          <td>${esc(x.customer_name)}${r && pt.name < 95 ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.customer_name)}</div>` : ''}</td>
+          <td class="num">${dateCell(x.install_date, '', x.month, x.excel_month_ok)}${r && (pt.date_days || x.pdf_month_ok === false) ? `<div class="faint" style="font-size:11.5px">PDF: ${dateCell(r.install_date, r.install_date_raw, x.month, x.pdf_month_ok)}</div>` : ''}</td>
+          <td class="num ${!r ? '' : pt.name >= 95 ? 'ok-mark' : pt.name >= 80 ? 'warn-mark' : 'bad-mark'}">${r ? `${pt.name}%` : ''}</td>
+          <td style="white-space:nowrap">${x.excel_file_id ? `<a href="${excelUrl(x.excel_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Excel ${ICON.ext}</a>` : ''}</td>
         </tr>`;
       }).join('')}</tbody></table>` : '<div class="empty">Nothing here.</div>';
   }
   view.innerHTML = `
     <div class="view-head"><div><h1><span class="tab-num big">2</span> Check Excel</h1>
-      <p>Each <b>Excel row</b> (row, VIN, customer, case number, install date) is the baseline. The app finds the PDF with the same VIN and checks every field. <b>% match</b> = VIN in file name 15 + photo 15 + paper 10 + name 25 + case number 15 + date 20. <span class="date-wrong-inline">Red date</span> = installation month is not the folder month.</p></div>
+      <p>The <b>Excel of the month folder</b> is the baseline and its <b>VIN is the key</b>. For each row: ① find the PDF in the same folder whose <b>file name</b> has this VIN, then check its <b>photo VIN</b> and <b>paper VIN</b>. ② Name and date are compared with low priority. <b>Result</b>: ① Match 3/3 · ② File + Photo (paper differs) · ③ File only (photo unread/different) · No PDF file. % = file 40 + photo 30 + paper 15 + name 10 + date 5. <span class="date-wrong-inline">Red date</span> = not in the folder month.</p></div>
       <div class="row-actions">
         ${monthExcel?.reference_file_id ? `<a class="btn" href="${excelUrl(monthExcel.reference_file_id)}" target="_blank" rel="noopener">Open ${esc(fmtMonth(monthExcel.month))} Excel ${ICON.ext}</a>` : ''}
         <button class="btn" data-export="${esc(batch)}" data-kind="check2">${ICON.download} Export Check 2</button></div></div>
     <div class="card">
       <div class="toolbar">
         <div class="field"><label>Month (Excel)</label><select class="select" id="ckBatch">${monthOptions(batch)}</select></div>
-        <div class="field grow"><label>% match</label>${chips}</div>
+        <div class="field grow"><label>Result</label>${chips}</div>
       </div>
       <div class="table-wrap">${table}</div>
       ${pager({ total: data.total, page: data.page, size: data.size })}
@@ -659,7 +660,7 @@ async function renderRecords(params) {
           ${[['', 'All'], ['updated', 'Updated'], ['deleted', 'Deleted']].map(([v, l]) => `<option value="${v}" ${(params.get('fstatus') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
         <div class="field"><label>② Check Excel</label><select class="select" name="xlband">
-          ${[['', 'All'], ['full', '100%'], ['high', '90–99%'], ['medium', '70–89%'], ['low', 'Below 70%'], ['noexcel', 'Not in Excel']].map(([v, l]) => `<option value="${v}" ${(params.get('xlband') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+          ${[['', 'All'], ['l1', '① Match 3/3'], ['l2', '② File + Photo'], ['l3', '③ File only'], ['noexcel', 'Not in Excel']].map(([v, l]) => `<option value="${v}" ${(params.get('xlband') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
         <div class="field"><label>① Check PDF</label><select class="select" name="vinlevel">
           ${[['', 'All'], ['1', '① Match 3/3'], ['2', '② File = Photo'], ['3', '③ Not matched']].map(([v, l]) => `<option value="${v}" ${(params.get('vinlevel') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
@@ -737,12 +738,12 @@ function openRecord(r) {
           ${r.xl_parts ? `<table class="vin-sources">
             <tr><td>Excel row</td><td colspan="2">${r.ref_sheet_name ? `“${esc(r.ref_sheet_name)}” ` : ''}row ${esc(r.ref_row || '?')}</td></tr>
             <tr><td>VIN (Excel)</td><td class="mono" colspan="2">${esc(r.vin)}</td></tr>
-            <tr><td>· file name</td><td class="mono">${esc(r.file_vin) || '–'}</td><td>${tick(r.xl_parts.vin_file, 15)}</td></tr>
-            <tr><td>· photo</td><td class="mono">${esc(r.vin_picture) || 'not read'}</td><td>${tick(r.xl_parts.vin_photo, 15)}</td></tr>
-            <tr><td>· paper box</td><td class="mono">${esc(r.paper_vin) || '–'}</td><td>${tick(r.xl_parts.vin_paper, 10)}</td></tr>
-            <tr><td>Name</td><td>${esc(r.ref_name) || '–'}${r.xl_parts.name < 95 ? `<div class="faint">PDF: ${esc(r.customer_name)}</div>` : ''}</td><td>${r.xl_parts.name}%</td></tr>
-            <tr><td>Case no.</td><td class="mono">${esc(r.ref_case) || '–'}${!r.xl_parts.case ? `<div class="faint">PDF: ${esc(r.job_number) || '–'}</div>` : ''}</td><td>${tick(r.xl_parts.case, 15)}</td></tr>
-            <tr><td>Date</td><td>${esc(fmtDate(r.ref_date)) || '–'}${r.xl_parts.date_days ? `<div class="faint">PDF: ${esc(fmtDate(r.install_date)) || '–'}</div>` : ''}</td><td>${dateMark(r.xl_parts.date_days)}</td></tr>
+            <tr><td>· file name</td><td class="mono">${esc(r.file_vin) || '–'}</td><td>${tick(r.xl_parts.vin_file, 40)}</td></tr>
+            <tr><td>· photo</td><td class="mono">${esc(r.vin_picture) || 'not read'}</td><td>${tick(r.xl_parts.vin_photo, 30)}</td></tr>
+            <tr><td>· paper box</td><td class="mono">${esc(r.paper_vin) || '–'}</td><td>${tick(r.xl_parts.vin_paper, 15)}</td></tr>
+            <tr><td>Name <span class="faint">(low)</span></td><td>${esc(r.ref_name) || '–'}${r.xl_parts.name < 95 ? `<div class="faint">PDF: ${esc(r.customer_name)}</div>` : ''}</td><td>${r.xl_parts.name}%</td></tr>
+            <tr><td>Case no. <span class="faint">(info)</span></td><td class="mono">${esc(r.ref_case) || '–'}${!r.xl_parts.case ? `<div class="faint">PDF: ${esc(r.job_number) || '–'}</div>` : ''}</td><td>${r.xl_parts.case ? '✔' : '–'}</td></tr>
+            <tr><td>Date <span class="faint">(low)</span></td><td>${esc(fmtDate(r.ref_date)) || '–'}${r.xl_parts.date_days ? `<div class="faint">PDF: ${esc(fmtDate(r.install_date)) || '–'}</div>` : ''}</td><td>${dateMark(r.xl_parts.date_days)}</td></tr>
           </table>` : `<div class="faint" style="font-size:12.5px">VIN ${esc(r.vin)} is not in the submission Excel.</div>`}
           <div class="row-actions">
             ${excelUrl(r.ref_file_id || r.month_ref_file_id) ? `<a class="btn sm" href="${excelUrl(r.ref_file_id || r.month_ref_file_id)}" target="_blank" rel="noopener">Open Excel ${ICON.ext}</a>` : ''}

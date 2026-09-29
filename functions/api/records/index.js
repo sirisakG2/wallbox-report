@@ -1,5 +1,5 @@
 // GET /api/records?batch=&q=&match=(0|1|null)&from=&to=&conf=(review|full)&vinlevel=(1|2|3)
-//   &excel=(match|close|different|missing)&xlband=(full|high|medium|low|noexcel)&fstatus=(updated|deleted)&datemonth=(wrong|missing)&page=1&size=50
+//   &excel=(match|close|different|missing)&xlband=(l1|l2|l3|noexcel)&fstatus=(updated|deleted)&datemonth=(wrong|missing)&page=1&size=50
 // (size=all for export). Rows come from the cached dataset (lib/dataset.js) and are filtered in memory.
 import { needsReview } from '../../../lib/confidence.js';
 import { loadAll } from '../../../lib/dataset.js';
@@ -28,7 +28,7 @@ export async function onRequestGet({ request, env }) {
   rows = [...rows].sort((a, b) => (b.install_date || '').localeCompare(a.install_date || '') || a.vin.localeCompare(b.vin));
 
   // Counts per check result for the rows matching the other filters (for the filter chips).
-  const facets = { vin: { 1: 0, 2: 0, 3: 0 }, excel: { match: 0, close: 0, different: 0, missing: 0 }, xl: { full: 0, high: 0, medium: 0, low: 0, noexcel: 0 }, review: 0, date_wrong: 0, date_missing: 0 };
+  const facets = { vin: { 1: 0, 2: 0, 3: 0 }, excel: { match: 0, close: 0, different: 0, missing: 0 }, xl: { l1: 0, l2: 0, l3: 0, noexcel: 0 }, review: 0, date_wrong: 0, date_missing: 0 };
   for (const r of rows) {
     facets.vin[r.vin_level]++; facets.excel[r.excel_status]++; facets.xl[r.xl_band]++;
     if (needsReview(r)) facets.review++;
@@ -45,7 +45,7 @@ export async function onRequestGet({ request, env }) {
   const excel = p.get('excel');
   if (['match', 'close', 'different', 'missing'].includes(excel)) rows = rows.filter((r) => r.excel_status === excel);
   const xlband = p.get('xlband');
-  if (['full', 'high', 'medium', 'low', 'noexcel'].includes(xlband)) rows = rows.filter((r) => r.xl_band === xlband);
+  if (['l1', 'l2', 'l3', 'noexcel'].includes(xlband)) rows = rows.filter((r) => r.xl_band === xlband);
   const level = Number(p.get('vinlevel'));
   if (level >= 1 && level <= 3) rows = rows.filter((r) => r.vin_level === level);
 
