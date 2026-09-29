@@ -168,52 +168,62 @@ async function route() {
 }
 
 // ---------- Dashboard ----------
-async function renderDashboard() {
-  const s = await api('/api/stats');
-  const b = state.batches;
+async function renderDashboard(params) {
+  // The chosen month is remembered in this browser (menu → Dashboard opens the same month again).
+  let saved = '';
+  try { saved = localStorage.getItem('dashMonth') || ''; } catch { /* private mode */ }
+  const batch = params.has('batch') ? params.get('batch') : saved;
+  const sel = state.batches.find((x) => String(x.id) === batch);
+  const s = await api(`/api/stats${sel ? `?batch=${sel.id}` : ''}`);
+  const b = sel ? [sel] : state.batches;
+  const bq = sel ? `batch=${sel.id}&` : ''; // keeps the month on every link
+  const openIssues = sel ? sel.open_issue_count + (sel.excel_problem_count || 0) : state.openIssues;
   const maxBar = Math.max(1, ...s.byInstallMonth.map((x) => x.n));
   view.innerHTML = `
     <div class="view-head">
-      <div><h1>Dashboard</h1><p>All imported months at a glance.</p></div>
-      <button class="btn primary lg" data-go="import">${ICON.play} Import a month</button>
+      <div><h1>Dashboard</h1><p>${sel ? `${esc(fmtMonth(sel.month, true))} only — folder “${esc(sel.folder_name || sel.folder_id)}”.` : 'All imported months at a glance.'}</p></div>
+      <div class="row-actions">
+        <div class="field"><label>Month</label><select class="select" id="dBatch">${monthOptions(batch)}</select></div>
+        ${sel ? `<button class="btn" data-summary="${sel.id}">Summary</button><button class="btn" data-export="${sel.id}">${ICON.download} Full report</button>` : ''}
+        <button class="btn primary lg" data-go="import">${ICON.play} Import a month</button></div>
     </div>
     <div class="card xl-hero" style="margin-bottom:16px">
       <div class="card-head"><h2><span class="tab-num">1</span> Excel Check — every Excel row checked against its PDF in the month folder</h2>
-        <a class="btn sm" href="#/check-excel">Open Excel Check</a></div>
+        <a class="btn sm" href="#/check-excel${sel ? `?batch=${sel.id}` : ''}">Open Excel Check</a></div>
       <div class="xl-hero-top card-pad">
-        <div class="xl-big"><div class="label">Excel rows</div><div class="value">${fmtN(s.baseline.excel_rows)}</div><div class="sub">all months · same count as the Excel files</div></div>
-        <a class="xl-big ok kpi-link" href="#/check-excel?band=complete"><div class="label">Complete</div><div class="value">${fmtN(s.baseline.complete)} <span class="level-pct">${pct(s.baseline.complete, s.baseline.excel_rows)}%</span></div>
+        <div class="xl-big"><div class="label">Excel rows</div><div class="value">${fmtN(s.baseline.excel_rows)}</div><div class="sub">${sel ? esc(fmtMonth(sel.month, true)) : 'all months'} · same count as the Excel file${sel ? '' : 's'}</div></div>
+        <a class="xl-big ok kpi-link" href="#/check-excel?${bq}band=complete"><div class="label">Complete</div><div class="value">${fmtN(s.baseline.complete)} <span class="level-pct">${pct(s.baseline.complete, s.baseline.excel_rows)}%</span></div>
           <div class="sub">by the app ${fmtN(s.baseline.complete - s.baseline.admin)} · <span class="admin-tag">admin</span> ${fmtN(s.baseline.admin)}${s.baseline.l2 ? ` · ${fmtN(s.baseline.l2)} with paper VIN differs` : ''}</div></a>
-        <a class="xl-big bad kpi-link" href="#/check-excel?band=open"><div class="label">Needs attention</div><div class="value">${fmtN(s.baseline.excel_rows - s.baseline.complete)} <span class="level-pct">${pct(s.baseline.excel_rows - s.baseline.complete, s.baseline.excel_rows)}%</span></div><div class="sub">see the reasons below</div></a>
+        <a class="xl-big bad kpi-link" href="#/check-excel?${bq}band=open"><div class="label">Needs attention</div><div class="value">${fmtN(s.baseline.excel_rows - s.baseline.complete)} <span class="level-pct">${pct(s.baseline.excel_rows - s.baseline.complete, s.baseline.excel_rows)}%</span></div><div class="sub">see the reasons below</div></a>
       </div>
       <div class="meter xl-meter"><i style="width:${pct(s.baseline.complete, s.baseline.excel_rows)}%"></i></div>
       <div class="grid cols-3 card-pad">
         ${[['l3', 'PDF found, but its VIN photo is unread or shows another VIN — open the PDF and confirm'], ['nopdf', 'No PDF in the month folder has this VIN in its file name'], ['novin', 'The Excel VIN cell is empty or not a VIN — approve a VIN or fix the Excel']].map(([k, desc]) => {
           const n = s.baseline[k];
-          return `<a class="card kpi kpi-link level-card ${n ? 'bad' : 'ok'}" href="#/check-excel?band=${k}" style="box-shadow:none;background:var(--surface-2)">
+          return `<a class="card kpi kpi-link level-card ${n ? 'bad' : 'ok'}" href="#/check-excel?${bq}band=${k}" style="box-shadow:none;background:var(--surface-2)">
             <div class="label">${BAND[k][1]}</div>
             <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.baseline.excel_rows)}%</span></div>
             <div class="sub" style="margin-top:8px">${desc}</div></a>`;
         }).join('')}
       </div>
-      <div class="legend" style="border-top:1px solid var(--border);border-bottom:0"><a href="#/check-excel?band=pdfonly">${fmtN(s.baseline.pdfonly)} PDFs are not in any Excel</a></div>
+      <div class="legend" style="border-top:1px solid var(--border);border-bottom:0"><a href="#/check-excel?${bq}band=pdfonly">${fmtN(s.baseline.pdfonly)} PDFs are not in any Excel</a></div>
     </div>
-    <a class="card date-alert ${s.date_wrong_month + s.date_missing ? 'on' : ''}" href="#/records?datemonth=wrong" style="margin-bottom:16px">
+    <a class="card date-alert ${s.date_wrong_month + s.date_missing ? 'on' : ''}" href="#/records?${bq}datemonth=wrong" style="margin-bottom:16px">
       <div><div class="label">Installation date not in the folder month</div>
         <div class="sub">Every installation should be dated in the month of its folder (e.g. June folder → June date). Click to see them.</div></div>
       <div class="da-num"><b>${fmtN(s.date_wrong_month)}</b><span>other month</span></div>
       <div class="da-num"><b>${fmtN(s.date_missing)}</b><span>no date</span></div>
     </a>
     <div class="grid cols-2">
-      <a class="card kpi kpi-link" href="#/issues"><div class="label"><span class="tab-num">2</span> Issues</div><div class="value" style="color:${state.openIssues ? 'var(--warn)' : 'inherit'}">${fmtN(state.openIssues)}</div><div class="sub">open problems to fix or approve — Excel side and PDF side</div></a>
+      <a class="card kpi kpi-link" href="#/issues${sel ? `?batch=${sel.id}` : ''}"><div class="label"><span class="tab-num">2</span> Issues</div><div class="value" style="color:${openIssues ? 'var(--warn)' : 'inherit'}">${fmtN(openIssues)}</div><div class="sub">open problems to fix or approve — Excel side and PDF side</div></a>
       <div class="card kpi"><div class="label">PDF Data — VIN decoded from each PDF <span class="faint" style="text-transform:none;letter-spacing:0">(supporting)</span></div>
-        <div class="pdf-levels">${[1, 2, 3].map((l) => `<a class="kpi-link" href="#/records?vinlevel=${l}"><span class="pill ${LEVEL[l][0]} plain lvl">${LEVEL[l][1]}</span> <b>${fmtN(s.vin_levels[l])}</b></a>`).join('')}</div>
+        <div class="pdf-levels">${[1, 2, 3].map((l) => `<a class="kpi-link" href="#/records?${bq}vinlevel=${l}"><span class="pill ${LEVEL[l][0]} plain lvl">${LEVEL[l][1]}</span> <b>${fmtN(s.vin_levels[l])}</b></a>`).join('')}</div>
         <div class="sub">${fmtN(s.records)} PDFs · file name VIN vs photo VIN vs paper VIN box</div></div>
     </div>
 
     <div class="grid cols-2 section-gap">
       <div class="card">
-        <div class="card-head"><h2>Imported months</h2><button class="btn sm" data-go="months">Months &amp; Import</button></div>
+        <div class="card-head"><h2>${sel ? 'This month' : 'Imported months'}</h2><button class="btn sm" data-go="months">Months &amp; Import</button></div>
         <div class="card-pad">
           ${b.length ? `<div class="months">${b.map(monthCard).join('')}</div>` : `<div class="empty">No months imported yet.<br><br><button class="btn primary" data-go="import">Import the first month</button></div>`}
         </div>
@@ -230,6 +240,10 @@ async function renderDashboard() {
         </div>
       </div>
     </div>`;
+  $('#dBatch').onchange = (e) => {
+    try { localStorage.setItem('dashMonth', e.target.value); } catch { /* private mode */ }
+    location.hash = `#/dashboard?batch=${e.target.value}`;
+  };
 }
 
 function monthCard(b) {
