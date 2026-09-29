@@ -1,4 +1,4 @@
-// Plain-language explanation of each "Other problems" type (English + Thai), shared by the page and
+// Plain-language explanation of each "Issues" type (English + Thai), shared by the page and
 // the detailed Excel export.
 export const PROBLEM_INFO = {
   edited_pdf: {
@@ -57,7 +57,7 @@ export const PROBLEM_INFO = {
   },
 };
 
-// Problems in the submission Excel itself (source ② Check Excel) — found live, fixed in the Excel file.
+// Problems in the submission Excel itself (Issues · Excel side) — found live, fixed in the Excel file.
 export const EXCEL_PROBLEM_INFO = {
   excel_no_vin: {
     name: 'VIN missing in Excel', th: 'ไม่มี VIN ใน Excel', tone: 'bad', sheet: 'Excel VIN missing',
@@ -65,8 +65,8 @@ export const EXCEL_PROBLEM_INFO = {
     meaning_th: 'ช่อง VIN (คอลัมน์ H) เป็นข้อความแทน VIN ส่วนใหญ่เป็น "ติดตั้งก่อนรับรถ" จึงจับคู่กับ PDF ด้วย VIN ไม่ได้',
     why: 'The installation cannot be verified against the PDF, and the VIN is needed for billing and warranty.',
     why_th: 'ตรวจสอบกับ PDF ไม่ได้ และต้องใช้ VIN ในการเบิกเงินและรับประกัน',
-    action: 'Use the suggested PDF (same customer name) to find the real VIN. If the PDF also has no real VIN yet, ask for the VIN after the car is delivered. Put the VIN into column H and import the month again.',
-    action_th: 'ดู PDF ที่ระบบแนะนำ (ชื่อลูกค้าเดียวกัน) เพื่อหา VIN จริง ถ้า PDF ยังไม่มี VIN จริงให้ขอ VIN หลังส่งมอบรถ ใส่ VIN ในคอลัมน์ H แล้ว Import month ใหม่',
+    action: 'Open Excel Check → "No valid VIN" and click the row: check the suggested PDF (same customer name) and approve its VIN with a remark (→ Complete, by admin). Or put the real VIN into column H and Re-check the month.',
+    action_th: 'เปิด Excel Check → "No valid VIN" คลิกแถว ตรวจ PDF ที่แนะนำ (ชื่อลูกค้าเดียวกัน) แล้วอนุมัติ VIN พร้อม Remark (→ Complete โดย admin) หรือใส่ VIN จริงในคอลัมน์ H แล้ว Re-check เดือนนั้น',
   },
   excel_bad_vin: {
     name: 'VIN typo in Excel', th: 'VIN ใน Excel พิมพ์ผิด', tone: 'bad', sheet: 'Excel VIN typo',
@@ -98,7 +98,7 @@ EXCEL_PROBLEM_INFO.excel_date_wrong_month = {
 };
 export const EXCEL_PROBLEM_TYPES = Object.keys(EXCEL_PROBLEM_INFO);
 
-// Installation-date rules checked live on the PDF data (source ① Check PDF).
+// Installation-date rules checked live on the PDF data (Issues · PDF side).
 export const DATE_PROBLEM_INFO = {
   date_wrong_month: {
     name: 'Install date not in folder month', th: 'วันที่ติดตั้งไม่ตรงเดือนของโฟลเดอร์', tone: 'bad', sheet: 'Date not in month',

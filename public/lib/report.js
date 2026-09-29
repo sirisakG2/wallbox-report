@@ -27,8 +27,10 @@ function vinFills(row, r, photoKey = 'vin_picture', paperKey = 'paper_vin') {
   else if (r.paper_vin !== r.file_vin) row.getCell(paperKey).fill = AMBER_FILL;
   if (adminText(r)) row.getCell('admin').fill = ADMIN_FILL;
 }
-// Check 2 result per Excel row / PDF (lib/baseline.js).
-const XL_LEVEL = { l1: '① Match 3/3', l2: '② File + Photo', l3: '③ File only', nopdf: 'No PDF file', novin: '⚠ No valid VIN in Excel', noexcel: 'Not in Excel' };
+// PDF VIN check level (lib/confidence.js VIN_LEVELS).
+const LEVEL_TEXT = { 1: 'All 3 match', 2: 'Paper differs', 3: 'Photo not confirmed' };
+// Excel Check result per Excel row / PDF (lib/baseline.js).
+const XL_LEVEL = { l1: 'Complete', l2: 'Complete · paper differs', l3: 'Photo not confirmed', nopdf: 'No PDF', novin: '⚠ No valid VIN', noexcel: 'Not in Excel' };
 const driveLink = (id) => (id ? { text: 'Open PDF', hyperlink: `https://drive.google.com/file/d/${id}/view` } : '');
 const urlLink = (u) => (u ? { text: u.replace(/^https?:\/\//, ''), hyperlink: u } : '');
 
@@ -50,140 +52,27 @@ function addSheet(wb, name, columns, rows, style) {
   return ws;
 }
 
-// kind: 'check1' (Check 1 sheet) · 'check2' (Check 2 sheet) · 'all' (PDF, Check 1, Check 2, Other problems)
+// kind: 'check2' (Excel Check) · 'check1' (PDF Data) · 'all' (Summary, Excel Check, Issues, PDF Data — the main report)
 export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'all' }) {
   const q = batchId ? `batch=${batchId}&` : '';
-  const want = { pdf: kind === 'all', check1: kind === 'all' || kind === 'check1', check2: kind === 'all' || kind === 'check2', problems: kind === 'all' };
-  const [{ records }, { issues }, { batches }] = await Promise.all([
+  const want = { pdf: kind === 'all' || kind === 'check1', check2: kind === 'all' || kind === 'check2', problems: kind === 'all' };
+  const [{ records }, { issues }, { batches }, { problems: excelIssues }] = await Promise.all([
     api(`/api/records?${q}size=all`),
     want.problems ? api(`/api/issues?${q}scope=other`) : { issues: [] },
     api('/api/batches'),
+    want.problems ? api(`/api/excel-problems${batchId ? `?batch=${batchId}` : ''}`) : { problems: [] },
   ]);
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Xpeng Thailand — Wall Box Installation Records';
   wb.created = new Date();
   const dateCol = { numFmt: 'dd/mm/yyyy' };
-
-  if (want.pdf) addSheet(wb, 'PDF', [
-    { header: 'VIN (file name, key)', key: 'vin', width: 21 },
-    { header: '① Check PDF', key: 'vin_level_label', width: 16 },
-    { header: '② Check Excel', key: 'xl_level', width: 16 },
-    { header: '② Check Excel %', key: 'xl_pct', width: 11 },
-    { header: 'Photo VIN', key: 'vin_picture', width: 24 },
-    { header: 'Paper VIN', key: 'paper_vin', width: 24 },
-    { header: 'Confirmed by admin', key: 'admin', width: 22 },
-    { header: '② Completed by', key: 'complete_by', width: 13 },
-    { header: 'Admin remark', key: 'admin_remark', width: 40 },
-    { header: 'Excel row', key: 'ref_row_text', width: 16 },
-    { header: 'Excel name (col D)', key: 'ref_name', width: 30 },
-    { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
-    { header: 'Date in folder month', key: 'date_month', width: 12 },
-    { header: 'Date %', key: 'date_conf_pct', width: 8 },
-    { header: 'Needs review', key: 'needs_review', width: 11 },
-    { header: 'VIN photo match', key: 'match', width: 10 },
-    { header: 'Read by', key: 'vin_read_by', width: 9 },
-    { header: 'Month', key: 'month', width: 9 },
-    { header: 'Job number', key: 'job_number', width: 15 },
-    { header: 'Charger / PO code', key: 'charger_code', width: 22 },
-    { header: 'Customer name', key: 'customer_name', width: 32 },
-    { header: 'Phone', key: 'phone', width: 14 },
-    { header: 'Region', key: 'region', width: 12 },
-    { header: 'Site type', key: 'site_type', width: 12 },
-    { header: 'Charger serial', key: 'serial', width: 13 },
-    { header: 'Report printed at', key: 'report_printed_at', width: 17 },
-    { header: 'Job URL', key: 'job_url', width: 30 },
-    { header: 'PDF file', key: 'pdf_name', width: 40 },
-    { header: 'PDF link', key: 'pdf_link', width: 10 },
-    { header: 'PDF file status', key: 'file_status_text', width: 20 },
-    { header: 'VIN — why', key: 'vin_why', width: 55 },
-    { header: 'Date — why', key: 'date_why', width: 55 },
-    { header: 'Notes', key: 'notes', width: 40 },
-  ], records.map((r) => ({
-    vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
-    xl_level: XL_LEVEL[r.xl_band] || '',
-    xl_pct: r.xl_band === 'noexcel' ? 'Not in Excel' : r.xl_score / 100,
-    date_month: !r.install_date ? 'NO DATE' : r.date_month_ok === false ? `✘ ${r.install_date.slice(0, 7)} ≠ ${r.month}` : '✔',
-    ref_row_text: r.ref_row ? `${r.ref_sheet_name || ''} · ${r.ref_row}` : '',
-    date_conf_pct: r.date_conf / 100,
-    needs_review: r.vin_level === 3 || r.xl_band === 'l3' || r.xl_band === 'noexcel' || r.date_conf < 95 || r.date_month_ok === false || !r.install_date ? 'Yes' : '',
-    vin_why: r.vin_conf_reasons.join('; '),
-    file_status_text: r.file_status ? `${r.file_status === 'updated' ? 'Updated' : 'Deleted'} ${String(r.file_status_at).slice(0, 10)}` : '',
-    date_why: r.date_conf_reasons.join('; '),
-    ...r,
-    _raw: r,
-    vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
-    vin_picture: photoText(r), paper_vin: paperText(r), admin: adminText(r),
-    complete_by: r.xl_band !== 'l1' ? '' : r.ref_admin || photoAdmin(r) || paperAdmin(r) ? 'Admin' : 'App (auto)',
-    admin_remark: r.ref_admin ? `Excel VIN cell "${r.ref_excel_vin_raw || '(empty)'}" → ${r.vin}: ${r.ref_admin_remark}` : '',
-    match: flagText(r.vin_photo_match),
-    install_date: toDate(r.install_date),
-    job_url: urlLink(r.job_url),
-    pdf_link: driveLink(r.pdf_file_id),
-  })), (row, m) => {
-    const r = m._raw; // the record itself (display values in m may be formatted)
-    if (r.date_month_ok === false || !r.install_date) { row.getCell('date_month').fill = RED_FILL; row.getCell('install_date').fill = RED_FILL; }
-    row.getCell('xl_level').fill = r.xl_band === 'l1' ? GREEN_FILL : r.xl_band === 'l2' ? AMBER_FILL : RED_FILL;
-    const xl = row.getCell('xl_pct');
-    xl.numFmt = '0%';
-    xl.fill = r.xl_band === 'l1' ? GREEN_FILL : r.xl_band === 'l2' ? AMBER_FILL : RED_FILL;
-    const dc = row.getCell('date_conf_pct');
-    dc.numFmt = '0%';
-    dc.fill = r.date_conf >= 95 ? GREEN_FILL : r.date_conf >= 80 ? AMBER_FILL : RED_FILL;
-    row.getCell('vin_level_label').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
-    vinFills(row, r);
-    if (m.complete_by === 'Admin') { row.getCell('complete_by').fill = ADMIN_FILL; row.getCell('admin_remark').fill = ADMIN_FILL; }
-    if (r.vin_level === 3 || r.xl_band === 'l3' || r.xl_band === 'noexcel' || r.date_conf < 95) row.getCell('needs_review').fill = AMBER_FILL;
-    if (r.file_status === 'deleted') row.getCell('file_status_text').fill = RED_FILL;
-    if (r.file_status === 'updated') row.getCell('file_status_text').fill = AMBER_FILL;
-    const c = row.getCell('match');
-    if (r.vin_photo_match === 0) c.fill = RED_FILL;
-    else if (r.vin_photo_match === 1) c.fill = GREEN_FILL;
-    else c.fill = AMBER_FILL;
-  });
-
-  const cmpCols = [
-    ['date_match', 'rec_date', 'ref_date'],
-    ['job_match', 'rec_job', 'ref_case'],
-    ['serial_match', 'rec_serial', 'ref_serial'],
-    ['name_match', 'rec_name', 'ref_name'],
-  ];
-  if (want.check1) {
-    const LEVEL = { 1: '① Match 3/3', 2: '② File = Photo', 3: '③ Not matched' };
-    addSheet(wb, 'Check 1 · PDF', [
-      { header: 'Month', key: 'month', width: 9 },
-      { header: 'VIN in file name (reference)', key: 'file_vin', width: 22 },
-      { header: 'VIN in photo', key: 'vin_picture', width: 24 },
-      { header: 'VIN in paper box', key: 'paper_vin', width: 24 },
-      { header: 'Result', key: 'level', width: 16 },
-      { header: 'Confirmed by admin', key: 'admin', width: 22 },
-      { header: 'Photo read by', key: 'read_by', width: 12 },
-      { header: 'Why', key: 'why', width: 60 },
-      { header: 'Customer (PDF)', key: 'customer_name', width: 30 },
-      { header: 'Job number', key: 'job_number', width: 15 },
-      { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
-      { header: 'Date in folder month', key: 'date_month', width: 12 },
-      { header: 'PDF file', key: 'pdf_name', width: 40 },
-      { header: 'PDF link', key: 'pdf_link', width: 10 },
-    ], records.map((r) => ({
-      _raw: r,
-      install_date: toDate(r.install_date),
-      date_month: !r.install_date ? 'NO DATE' : r.date_month_ok === false ? `✘ ${r.install_date.slice(0, 7)} ≠ ${r.month}` : '✔',
-      month: r.month, file_vin: r.file_vin || '', vin_picture: photoText(r),
-      paper_vin: paperText(r), admin: adminText(r), level: LEVEL[r.vin_level], read_by: r.vin_read_by === 'free' ? 'Free reader' : r.vin_read_by === 'ai' ? 'AI' : '',
-      why: r.vin_conf_reasons.join('; '), customer_name: r.customer_name, job_number: r.job_number, pdf_name: r.pdf_name, pdf_link: driveLink(r.pdf_file_id),
-    })), (row, m) => {
-    const r = m._raw; // the record itself (display values in m may be formatted)
-      row.getCell('level').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
-      if (r.date_month_ok === false || !r.install_date) { row.getCell('date_month').fill = RED_FILL; row.getCell('install_date').fill = RED_FILL; }
-      vinFills(row, r);
-    });
-  }
+  const sum = wb.addWorksheet('Summary'); // first sheet; filled at the end
 
   const base = want.check2 ? await api(`/api/baseline?${batchId ? `batch=${batchId}&` : ''}size=all`) : null;
   if (want.check2) {
   const mark = (ok) => (ok ? '✔' : '✘');
-  addSheet(wb, 'Check 2 · Excel baseline', [
+  addSheet(wb, 'Excel Check', [
     { header: 'Month', key: 'month', width: 9 },
     { header: 'Excel sheet', key: 'sheet_name', width: 16 },
     { header: 'Excel row', key: 'row_no', width: 9 },
@@ -230,7 +119,7 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     complete_by: x.complete_by === 'admin' ? 'Admin' : x.complete_by === 'app' ? 'App (auto)' : '',
     admin_remark: x.admin_remark || '',
   })), (row, x) => {
-    const fill = x.band === 'l1' ? GREEN_FILL : x.band === 'l2' ? AMBER_FILL : RED_FILL;
+    const fill = x.band === 'l1' || x.band === 'l2' ? GREEN_FILL : RED_FILL;
     if (x.invalid_vin) { // special issue: highlight the whole row
       row.eachCell({ includeEmpty: true }, (c) => { c.fill = RED_FILL; });
       row.getCell('vin').font = { bold: true, color: { argb: 'FFD23434' } };
@@ -247,7 +136,7 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     if (x.record && photoAdmin(x.record)) row.getCell('photo_vin').fill = ADMIN_FILL;
     if (x.record && paperAdmin(x.record)) row.getCell('paper_vin').fill = ADMIN_FILL;
     if (x.record && adminText(x.record)) row.getCell('admin').fill = ADMIN_FILL;
-    if (x.complete_by === 'Admin') { row.getCell('complete_by').fill = ADMIN_FILL; row.getCell('admin_remark').fill = ADMIN_FILL; row.getCell('level').value = '① Match 3/3 (admin)'; }
+    if (x.complete_by === 'Admin') { row.getCell('complete_by').fill = ADMIN_FILL; row.getCell('admin_remark').fill = ADMIN_FILL; row.getCell('level').value = `${XL_LEVEL[x.band]} (by admin)`; }
     if (x.parts && x.parts.date_days) row.getCell('date').fill = AMBER_FILL;
     if (x.parts && x.parts.name < 80) row.getCell('name').fill = AMBER_FILL;
     if (x.excel_month_ok === false) { row.getCell('excel_month').fill = RED_FILL; row.getCell('install_date').fill = RED_FILL; }
@@ -256,55 +145,139 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
 
   }
 
-  if (want.problems) addSheet(wb, 'Other problems', [
-    { header: 'Type', key: 'type', width: 16 },
+  if (want.problems) addSheet(wb, 'Issues', [
+    { header: 'Side', key: 'side', width: 10 },
+    { header: 'Type', key: 'type', width: 22 },
     { header: 'VIN', key: 'vin', width: 21 },
     { header: 'Month', key: 'month', width: 9 },
     { header: 'Detail', key: 'detail', width: 70 },
     { header: 'PDF file', key: 'pdf_name', width: 40 },
     { header: 'PDF link', key: 'pdf_link', width: 10 },
+    { header: 'Excel row', key: 'excel_row', width: 18 },
     { header: 'Resolved', key: 'resolved', width: 9 },
-  ], issues.map((i) => {
-    let detail = i.detail;
-    try { const d = JSON.parse(i.detail); if (d?.message) detail = d.message; } catch { /* plain text */ }
-    return { ...i, detail, resolved: i.resolved ? 'Yes' : '', pdf_link: driveLink(i.pdf_file_id) };
-  }));
+  ], [
+    ...excelIssues.map((x) => ({ side: 'Excel', type: EXCEL_PROBLEM_INFO[x.type]?.name || x.type, vin: x.excel_vin || '(empty)', month: x.month,
+      detail: x.detail, excel_row: `${x.sheet_name || ''} · row ${x.row_no}`, pdf_name: x.suggestion?.pdf_name || '', pdf_link: driveLink(x.suggestion?.pdf_file_id) })),
+    ...issues.map((i) => {
+      let detail = i.detail;
+      try { const d = JSON.parse(i.detail); if (d?.message) detail = d.message; } catch { /* plain text */ }
+      return { ...i, side: 'PDF', type: PROBLEM_INFO[i.type]?.name || i.type, detail, resolved: i.resolved ? 'Yes' : '', pdf_link: driveLink(i.pdf_file_id) };
+    }),
+  ], (row, x) => { row.getCell('side').fill = x.side === 'Excel' ? AMBER_FILL : ADMIN_FILL; });
+
+  if (want.pdf) addSheet(wb, 'PDF Data', [
+    { header: 'VIN (file name, key)', key: 'vin', width: 21 },
+    { header: 'VIN check (PDF)', key: 'vin_level_label', width: 20 },
+    { header: 'Excel Check', key: 'xl_level', width: 22 },
+    { header: 'Excel Check %', key: 'xl_pct', width: 11 },
+    { header: 'Photo VIN', key: 'vin_picture', width: 24 },
+    { header: 'Paper VIN', key: 'paper_vin', width: 24 },
+    { header: 'Confirmed by admin', key: 'admin', width: 22 },
+    { header: 'Completed by', key: 'complete_by', width: 13 },
+    { header: 'Admin remark', key: 'admin_remark', width: 40 },
+    { header: 'Excel row', key: 'ref_row_text', width: 16 },
+    { header: 'Excel name (col D)', key: 'ref_name', width: 30 },
+    { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
+    { header: 'Date in folder month', key: 'date_month', width: 12 },
+    { header: 'Date %', key: 'date_conf_pct', width: 8 },
+    { header: 'Needs review', key: 'needs_review', width: 11 },
+    { header: 'VIN photo match', key: 'match', width: 10 },
+    { header: 'Read by', key: 'vin_read_by', width: 9 },
+    { header: 'Month', key: 'month', width: 9 },
+    { header: 'Job number', key: 'job_number', width: 15 },
+    { header: 'Charger / PO code', key: 'charger_code', width: 22 },
+    { header: 'Customer name', key: 'customer_name', width: 32 },
+    { header: 'Phone', key: 'phone', width: 14 },
+    { header: 'Region', key: 'region', width: 12 },
+    { header: 'Site type', key: 'site_type', width: 12 },
+    { header: 'Charger serial', key: 'serial', width: 13 },
+    { header: 'Report printed at', key: 'report_printed_at', width: 17 },
+    { header: 'Job URL', key: 'job_url', width: 30 },
+    { header: 'PDF file', key: 'pdf_name', width: 40 },
+    { header: 'PDF link', key: 'pdf_link', width: 10 },
+    { header: 'PDF file status', key: 'file_status_text', width: 20 },
+    { header: 'VIN — why', key: 'vin_why', width: 55 },
+    { header: 'Date — why', key: 'date_why', width: 55 },
+    { header: 'Notes', key: 'notes', width: 40 },
+  ], records.map((r) => ({
+    vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
+    xl_level: XL_LEVEL[r.xl_band] || '',
+    xl_pct: r.xl_band === 'noexcel' ? 'Not in Excel' : r.xl_score / 100,
+    date_month: !r.install_date ? 'NO DATE' : r.date_month_ok === false ? `✘ ${r.install_date.slice(0, 7)} ≠ ${r.month}` : '✔',
+    ref_row_text: r.ref_row ? `${r.ref_sheet_name || ''} · ${r.ref_row}` : '',
+    date_conf_pct: r.date_conf / 100,
+    needs_review: r.vin_level === 3 || r.xl_band === 'l3' || r.xl_band === 'noexcel' || r.date_conf < 95 || r.date_month_ok === false || !r.install_date ? 'Yes' : '',
+    vin_why: r.vin_conf_reasons.join('; '),
+    file_status_text: r.file_status ? `${r.file_status === 'updated' ? 'Updated' : 'Deleted'} ${String(r.file_status_at).slice(0, 10)}` : '',
+    date_why: r.date_conf_reasons.join('; '),
+    ...r,
+    _raw: r,
+    vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
+    vin_picture: photoText(r), paper_vin: paperText(r), admin: adminText(r),
+    complete_by: r.xl_band !== 'l1' && r.xl_band !== 'l2' ? '' : r.ref_admin || photoAdmin(r) || paperAdmin(r) ? 'Admin' : 'App (auto)',
+    admin_remark: r.ref_admin ? `Excel VIN cell "${r.ref_excel_vin_raw || '(empty)'}" → ${r.vin}: ${r.ref_admin_remark}` : '',
+    match: flagText(r.vin_photo_match),
+    install_date: toDate(r.install_date),
+    job_url: urlLink(r.job_url),
+    pdf_link: driveLink(r.pdf_file_id),
+  })), (row, m) => {
+    const r = m._raw; // the record itself (display values in m may be formatted)
+    if (r.date_month_ok === false || !r.install_date) { row.getCell('date_month').fill = RED_FILL; row.getCell('install_date').fill = RED_FILL; }
+    row.getCell('xl_level').fill = r.xl_band === 'l1' || r.xl_band === 'l2' ? GREEN_FILL : RED_FILL;
+    const xl = row.getCell('xl_pct');
+    xl.numFmt = '0%';
+    xl.fill = r.xl_band === 'l1' || r.xl_band === 'l2' ? GREEN_FILL : RED_FILL;
+    const dc = row.getCell('date_conf_pct');
+    dc.numFmt = '0%';
+    dc.fill = r.date_conf >= 95 ? GREEN_FILL : r.date_conf >= 80 ? AMBER_FILL : RED_FILL;
+    row.getCell('vin_level_label').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
+    vinFills(row, r);
+    if (m.complete_by === 'Admin') { row.getCell('complete_by').fill = ADMIN_FILL; row.getCell('admin_remark').fill = ADMIN_FILL; }
+    if (r.vin_level === 3 || r.xl_band === 'l3' || r.xl_band === 'noexcel' || r.date_conf < 95) row.getCell('needs_review').fill = AMBER_FILL;
+    if (r.file_status === 'deleted') row.getCell('file_status_text').fill = RED_FILL;
+    if (r.file_status === 'updated') row.getCell('file_status_text').fill = AMBER_FILL;
+    const c = row.getCell('match');
+    if (r.vin_photo_match === 0) c.fill = RED_FILL;
+    else if (r.vin_photo_match === 1) c.fill = GREEN_FILL;
+    else c.fill = AMBER_FILL;
+  });
 
   const scope = batchId ? batches.filter((b) => b.id === batchId) : batches;
-  const sum = wb.addWorksheet('Summary');
-  sum.columns = [{ width: 34 }, { width: 18 }];
+  sum.columns = [{ width: 50 }, { width: 44 }];
   const title = sum.addRow(['Xpeng Thailand — Wall Box Installation Records']);
   title.font = { ...FONT, size: 14, bold: true };
   sum.addRow([`Export: ${label}`]).font = FONT;
   sum.addRow([`Generated: ${new Date().toLocaleString('en-GB')}`]).font = FONT;
   sum.addRow([]);
   const lines = [
-    ['Export', { check1: '① Check PDF — file name ↔ inside PDF', check2: '② Check Excel — Excel rows as baseline', all: 'All sheets' }[kind]],
+    ['Export', { check1: 'PDF Data — what was decoded from each PDF', check2: 'Excel Check — Excel rows as baseline', all: 'Main report — Excel Check, Issues, PDF Data' }[kind]],
     ['Months included', scope.map((b) => b.month).join(', ')],
     ['PDFs in folder(s)', scope.reduce((a, b) => a + b.pdf_count, 0)],
     ['PDF records (unique VIN)', records.length],
     ['⚠ Install date not in folder month', records.filter((r) => r.date_month_ok === false).length],
     ['⚠ No installation date', records.filter((r) => !r.install_date).length],
   ];
-  if (want.check1) lines.push(
-    ['① Match 3/3 (file = photo = paper)', records.filter((r) => r.vin_level === 1).length],
-    ['② File = Photo (paper box differs)', records.filter((r) => r.vin_level === 2).length],
-    ['③ Not matched (photo ≠ file name)', records.filter((r) => r.vin_level === 3).length],
+  if (want.pdf) lines.push(
+    [`PDF VIN check · ${LEVEL_TEXT[1]} (file = photo = paper)`, records.filter((r) => r.vin_level === 1).length],
+    [`PDF VIN check · ${LEVEL_TEXT[2]} (photo confirms)`, records.filter((r) => r.vin_level === 2).length],
+    [`PDF VIN check · ${LEVEL_TEXT[3]} (photo ≠ file name)`, records.filter((r) => r.vin_level === 3).length],
     ['Photo VIN confirmed by admin', records.filter(photoAdmin).length],
     ['Paper VIN confirmed by admin', records.filter(paperAdmin).length],
   );
-  if (want.check2) lines.push(
-    ['Check 2 · Excel rows', base.rows.length],
-    ['Check 2 · ① Match 3/3 (file + photo + paper)', base.facets.l1],
-    ['Check 2 · ② File + Photo (paper differs)', base.facets.l2],
-    ['Check 2 · ③ File only (photo unread / different)', base.facets.l3],
-    ['Check 2 · No PDF file with this VIN in the folder', base.facets.nopdf],
-    ['Check 2 · ⚠ Excel row with no valid VIN (empty / text / typo)', base.facets.novin],
-    ['Check 2 · ① completed by the app (auto)', base.facets.l1 - base.facets.admin],
-    ['Check 2 · ① completed by admin (see "Admin remark")', base.facets.admin],
-    ['Check 2 · PDF not in Excel', base.facets.pdfonly],
+  if (want.check2) lines.splice(2, 0,
+    ['EXCEL CHECK — Excel rows (baseline)', base.rows.length],
+    ['✔ Complete', base.facets.complete],
+    ['   · completed by the app (auto)', base.facets.complete - base.facets.admin],
+    ['   · completed by admin (see "Admin remark")', base.facets.admin],
+    ['   · of which the paper VIN box differs', base.facets.l2],
+    ['✘ Needs attention', base.rows.length - base.facets.complete],
+    ['   · Photo not confirmed', base.facets.l3],
+    ['   · No PDF (no PDF with this VIN in the folder)', base.facets.nopdf],
+    ['   · ⚠ No valid VIN in the Excel row', base.facets.novin],
+    ['PDF in the folder but not in the Excel', base.facets.pdfonly],
+    [],
   );
-  if (want.problems) lines.push(['Other problems (open)', issues.filter((i) => !i.resolved).length]);
+  if (want.problems) lines.push(['Issues (open) — Excel side', excelIssues.length], ['Issues (open) — PDF side', issues.filter((i) => !i.resolved).length]);
   for (const l of lines) {
     const row = sum.addRow(l);
     row.font = FONT;
@@ -319,14 +292,14 @@ export async function downloadWorkbook(ExcelJS, opts) {
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `wallbox_${opts.kind || 'all'}_${opts.fileTag}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.download = `wallbox_${{ check1: 'pdf-data', check2: 'excel-check', problems: 'issues' }[opts.kind] || 'report'}_${opts.fileTag}_${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
-// ---------- Detailed "Other problems" workbook (with explanations in English and Thai) ----------
+// ---------- Detailed "Issues" workbook (with explanations in English and Thai) ----------
 
 const WRAP = { wrapText: true, vertical: 'top' };
 const PDF_SRC_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9F7F1' } };
@@ -361,15 +334,15 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
   // --- Read me
   const rm = wb.addWorksheet('Read me', { views: [{ showGridLines: false }] });
   rm.columns = [{ width: 26 }, { width: 22 }, { width: 55 }, { width: 55 }, { width: 45 }, { width: 55 }, { width: 55 }, { width: 8 }, { width: 10 }, { width: 18 }];
-  const t = rm.addRow(['Other problems — explanation and details']);
+  const t = rm.addRow(['Issues — explanation and details']);
   t.font = { ...FONT, size: 16, bold: true };
   rm.addRow([`Export: ${label} · generated ${new Date().toLocaleString('en-GB')}`]).font = { ...FONT, color: { argb: 'FF666666' } };
   rm.addRow([]);
   for (const line of [
-    'Problems the check tables do not show, split by source: ① from Check PDF (found while reading the PDF files — fix/resolve in the app) and ② from Check Excel (found in the submission Excel — fix in the Excel file, then import the month again).',
-    'ปัญหาแบ่งตามแหล่งที่มา: ① จาก Check PDF (พบตอนอ่านไฟล์ PDF แก้ไข/Resolve ในแอป) และ ② จาก Check Excel (พบในไฟล์ Excel ให้แก้ในไฟล์ Excel แล้ว Import month ใหม่)',
-    'How to use: 1) read the explanation of each problem below · 2) go to the sheet of that problem (tabs at the bottom) · 3) open the PDF link, check, and fix or mark it resolved in the app (menu "Other problems").',
-    'วิธีใช้: 1) อ่านคำอธิบายแต่ละปัญหาด้านล่าง 2) ไปที่ชีตของปัญหานั้น (แท็บด้านล่าง) 3) คลิกลิงก์ PDF ตรวจสอบ แล้วแก้ไขหรือกด Resolve ในแอป (เมนู Other problems)',
+    'Issues split by side: Excel side (found in the submission Excel — fix in the Excel file and Re-check the month, or approve a VIN in Excel Check) and PDF side (found while decoding the PDF files — fix/resolve in the app).',
+    'ปัญหาแบ่งเป็น 2 ฝั่ง: ฝั่ง Excel (พบในไฟล์ Excel ให้แก้ในไฟล์ Excel แล้ว Re-check หรืออนุมัติ VIN ในเมนู Excel Check) และฝั่ง PDF (พบตอนอ่านไฟล์ PDF แก้ไข/Resolve ในแอป)',
+    'How to use: 1) read the explanation of each problem below · 2) go to the sheet of that problem (tabs at the bottom) · 3) open the PDF link, check, and fix or mark it resolved in the app (menu "Issues").',
+    'วิธีใช้: 1) อ่านคำอธิบายแต่ละปัญหาด้านล่าง 2) ไปที่ชีตของปัญหานั้น (แท็บด้านล่าง) 3) คลิกลิงก์ PDF ตรวจสอบ แล้วแก้ไขหรือกด Resolve ในแอป (เมนู Issues)',
   ]) { const r = rm.addRow([line]); r.font = FONT; rm.mergeCells(r.number, 1, r.number, 9); r.alignment = WRAP; r.height = 30; }
   rm.addRow([]);
   const head = rm.addRow(['Problem', 'ปัญหา', 'What it means', 'ความหมาย', 'Why it matters', 'What to do', 'สิ่งที่ต้องทำ', 'Open', 'Resolved', 'Source']);
@@ -384,13 +357,13 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
     r.height = 105;
     r.getCell(1).font = { ...FONT, bold: true };
     r.getCell(8).fill = list.some((i) => !i.resolved) ? AMBER_FILL : GREEN_FILL;
-    r.getCell(10).value = '① Check PDF';
+    r.getCell(10).value = 'PDF side';
     r.getCell(10).fill = PDF_SRC_FILL;
   }
   for (const type of DATE_PROBLEM_TYPES) {
     const p = DATE_PROBLEM_INFO[type];
     const n = dateProbs.filter((x) => x.type === type).length;
-    const r = rm.addRow([p.name, p.th, p.meaning, p.meaning_th, `${p.why}\n${p.why_th}`, p.action, p.action_th, n, '–', '① Check PDF (date)']);
+    const r = rm.addRow([p.name, p.th, p.meaning, p.meaning_th, `${p.why}\n${p.why_th}`, p.action, p.action_th, n, '–', 'PDF side (date)']);
     r.font = FONT; r.alignment = WRAP; r.height = 105;
     r.getCell(1).font = { ...FONT, bold: true, color: { argb: 'FFD23434' } };
     r.getCell(8).fill = n ? RED_FILL : GREEN_FILL;
@@ -399,7 +372,7 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
   for (const type of EXCEL_PROBLEM_TYPES) {
     const p = EXCEL_PROBLEM_INFO[type];
     const n = type === 'excel_date_wrong_month' ? xlDate.length : excelProbs.filter((x) => x.type === type).length;
-    const r = rm.addRow([p.name, p.th, p.meaning, p.meaning_th, `${p.why}\n${p.why_th}`, p.action, p.action_th, n, '–', '② Check Excel']);
+    const r = rm.addRow([p.name, p.th, p.meaning, p.meaning_th, `${p.why}\n${p.why_th}`, p.action, p.action_th, n, '–', 'Excel side']);
     r.font = FONT;
     r.alignment = WRAP;
     r.height = 105;
@@ -413,7 +386,7 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
     const r = recOf(i);
     const b = batchOf.get(i.batch_id);
     return {
-      source: '① Check PDF',
+      source: 'PDF side',
       problem: PROBLEM_INFO[i.type]?.name || i.type,
       status: i.resolved ? 'Resolved' : 'Open',
       month: i.month || b?.month || '',
@@ -450,20 +423,20 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
   const statusFill = (row, i) => { row.getCell('status').fill = i.resolved ? GREEN_FILL : AMBER_FILL; };
   const sorted = [...issues].sort((a, b) => a.resolved - b.resolved || PROBLEM_TYPES.indexOf(a.type) - PROBLEM_TYPES.indexOf(b.type));
   const excelRows = excelProbs.map((x) => ({
-    source: '② Check Excel', problem: EXCEL_PROBLEM_INFO[x.type]?.name || x.type, status: 'Fix in Excel', month: x.month,
+    source: 'Excel side', problem: EXCEL_PROBLEM_INFO[x.type]?.name || x.type, status: 'Fix in Excel', month: x.month,
     vin: x.excel_vin, customer: x.customer_name || '', job: x.case_number || '', pdf_name: x.suggestion?.pdf_name || '',
     pdf_link: driveLink(x.suggestion?.pdf_file_id), excel_row: `${x.sheet_name || ''} · row ${x.row_no}`, excel_link: excelLink(x.excel_file_id),
     what: x.detail + (x.suggestion ? ` — suggested PDF: ${x.suggestion.vin} (${x.suggestion.how})` : ''), todo: EXCEL_PROBLEM_INFO[x.type]?.action || '', found: '',
   }));
   const dateRows = dateProbs.map(({ type, r }) => ({
-    source: '① Check PDF', problem: DATE_PROBLEM_INFO[type].name, status: r.date_confirmed ? 'Confirmed' : 'Open', month: r.month, vin: r.vin,
+    source: 'PDF side', problem: DATE_PROBLEM_INFO[type].name, status: r.date_confirmed ? 'Confirmed' : 'Open', month: r.month, vin: r.vin,
     customer: r.customer_name, job: r.job_number, pdf_name: r.pdf_name, pdf_link: driveLink(r.pdf_file_id),
     excel_row: r.ref_row ? `${r.ref_sheet_name || ''} · row ${r.ref_row}` : '', excel_link: excelLink(r.ref_file_id || r.month_ref_file_id),
     what: type === 'date_missing' ? `No date could be read (PDF text: "${r.install_date_raw || ''}")` : `Installed ${r.install_date} — folder month ${r.month}`,
     todo: DATE_PROBLEM_INFO[type].action, found: '',
   }));
   const xlDateRows = xlDate.map((x) => ({
-    source: '② Check Excel', problem: EXCEL_PROBLEM_INFO.excel_date_wrong_month.name, status: 'Fix in Excel', month: x.month, vin: x.vin,
+    source: 'Excel side', problem: EXCEL_PROBLEM_INFO.excel_date_wrong_month.name, status: 'Fix in Excel', month: x.month, vin: x.vin,
     customer: x.customer_name, job: x.case_number, pdf_name: x.record?.pdf_name || '', pdf_link: driveLink(x.record?.pdf_file_id),
     excel_row: `${x.sheet_name || ''} · row ${x.row_no}`, excel_link: excelLink(x.excel_file_id),
     what: `Excel date ${x.install_date} is not in ${x.month}${x.record ? ` (PDF date ${x.record.install_date || '–'})` : ''}`,
@@ -472,7 +445,7 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
   const allRows = [...dateRows, ...sorted.map(common), ...excelRows, ...xlDateRows];
   addSheet(wb, 'All problems', [...commonCols, ...tailCols], allRows, (row) => {
     const x = allRows[row.number - 2];
-    row.getCell('source').fill = x.source.startsWith('②') ? EXCEL_SRC_FILL : PDF_SRC_FILL;
+    row.getCell('source').fill = x.source.startsWith('Excel') ? EXCEL_SRC_FILL : PDF_SRC_FILL;
     row.getCell('status').fill = x.status === 'Resolved' ? GREEN_FILL : AMBER_FILL;
   });
 
@@ -521,7 +494,7 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
     const ws = addSheet(wb, PROBLEM_INFO[type].sheet, [...commonCols, ...x.cols, ...tailCols],
       list.map((i) => ({ ...common(i), ...x.row(i, recOf(i)) })), (row) => statusFill(row, list[row.number - 2]));
     // Explanation above the table.
-    ws.spliceRows(1, 0, [`① ${PROBLEM_INFO[type].name} — ${PROBLEM_INFO[type].th}`], [PROBLEM_INFO[type].meaning], [`What to do: ${PROBLEM_INFO[type].action}`], []);
+    ws.spliceRows(1, 0, [`PDF side · ${PROBLEM_INFO[type].name} — ${PROBLEM_INFO[type].th}`], [PROBLEM_INFO[type].meaning], [`What to do: ${PROBLEM_INFO[type].action}`], []);
     for (const n of [1, 2, 3]) { ws.mergeCells(n, 1, n, 8); ws.getRow(n).alignment = WRAP; ws.getRow(n).font = { ...FONT, bold: n === 1, size: n === 1 ? 13 : 10 }; }
     ws.getRow(2).height = 30;
     ws.getRow(3).height = 30;
@@ -546,13 +519,13 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
       { header: 'Excel link', key: 'excel_link', width: 11 },
     ], [
       ...dateProbs.map(({ type, r }) => ({
-        source: '① PDF date', problem: DATE_PROBLEM_INFO[type].name, month: r.month, date_month: r.install_date ? r.install_date.slice(0, 7) : 'no date',
+        source: 'PDF side · date', problem: DATE_PROBLEM_INFO[type].name, month: r.month, date_month: r.install_date ? r.install_date.slice(0, 7) : 'no date',
         date: toDate(r.install_date), raw: r.install_date_raw, vin: r.vin, customer: r.customer_name,
         excel_row: r.ref_row ? `${r.ref_sheet_name || ''} · row ${r.ref_row}` : '', excel_date: toDate(r.ref_date),
         todo: DATE_PROBLEM_INFO[type].action, pdf_link: driveLink(r.pdf_file_id), excel_link: excelLink(r.ref_file_id || r.month_ref_file_id),
       })),
       ...xlDate.map((x) => ({
-        source: '② Excel date', problem: EXCEL_PROBLEM_INFO.excel_date_wrong_month.name, month: x.month, date_month: x.install_date.slice(0, 7),
+        source: 'Excel side · date', problem: EXCEL_PROBLEM_INFO.excel_date_wrong_month.name, month: x.month, date_month: x.install_date.slice(0, 7),
         date: toDate(x.record?.install_date), raw: x.record?.install_date_raw || '', vin: x.vin, customer: x.customer_name,
         excel_row: `${x.sheet_name || ''} · row ${x.row_no}`, excel_date: toDate(x.install_date),
         todo: EXCEL_PROBLEM_INFO.excel_date_wrong_month.action, pdf_link: driveLink(x.record?.pdf_file_id), excel_link: excelLink(x.excel_file_id),
@@ -565,7 +538,7 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
   }
 
   if (excelProbs.length) {
-    const ws = addSheet(wb, '② Excel problems', [
+    const ws = addSheet(wb, 'Excel side problems', [
       { header: 'Problem', key: 'problem', width: 26 },
       { header: 'Month', key: 'month', width: 9 },
       { header: 'Excel sheet', key: 'sheet', width: 16 },
@@ -585,7 +558,7 @@ export async function buildProblemsWorkbook(ExcelJS, { batchId = null, label }) 
       sug_name: x.suggestion?.customer_name || '', sug_link: driveLink(x.suggestion?.pdf_file_id), todo: EXCEL_PROBLEM_INFO[x.type]?.action || '',
       excel_link: excelLink(x.excel_file_id),
     })), (row) => { row.getCell('excel_vin').fill = RED_FILL; });
-    ws.spliceRows(1, 0, ['② From Check Excel — problems in the submission Excel (fix in the Excel file, then import the month again)'], []);
+    ws.spliceRows(1, 0, ['Excel side — problems in the submission Excel (fix in the Excel file and Re-check the month, or approve a VIN in Excel Check)'], []);
     ws.getRow(1).font = { ...FONT, size: 13, bold: true };
     ws.views = [{ state: 'frozen', ySplit: 3 }];
     ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: ws.columnCount } };
@@ -599,7 +572,7 @@ export async function downloadProblemsWorkbook(ExcelJS, opts) {
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `wallbox_problems_${opts.fileTag}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.download = `wallbox_issues_${opts.fileTag}_${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();

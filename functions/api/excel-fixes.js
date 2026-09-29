@@ -1,5 +1,5 @@
 // Admin approval for an Excel row that has no valid VIN (Check 2 "⚠ No valid VIN in Excel").
-// POST   /api/excel-fixes  { batch_id, sheet_name, row_no, vin, remark }  → the row uses this VIN, status ① Match 3/3 (admin)
+// POST   /api/excel-fixes  { batch_id, sheet_name, row_no, vin, remark }  → the row uses this VIN, status Complete (by admin)
 // DELETE /api/excel-fixes  { batch_id, sheet_name, row_no }                → remove the approval
 // The VIN must be the file name VIN of a PDF in the same month folder. Every change is written to record_history.
 import { bump } from '../../lib/cache.js';
@@ -18,7 +18,7 @@ export async function onRequestPost({ request, env }) {
   if (!VIN_RE.test(vin)) return bad('VIN must be 17 characters (letters except I, O, Q and digits)');
   if (remark.length < 3 || remark.length > 500) return bad('Please write a remark (3–500 characters)');
   const row = await excelRow(db, b);
-  if (!row) return bad('This Excel row has no invalid VIN any more — re-open Check Excel', 404);
+  if (!row) return bad('This Excel row has no invalid VIN any more — re-open Excel Check', 404);
   const pdf = await db.prepare(`SELECT vin, pdf_file_id, pdf_name FROM records WHERE batch_id = ? AND (file_vin = ?2 OR (file_vin = '' AND vin = ?2)) AND file_status <> 'deleted'`)
     .bind(row.batch_id, vin).first();
   if (!pdf) return bad(`No PDF in this month folder has ${vin} in its file name`);

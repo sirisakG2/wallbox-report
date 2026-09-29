@@ -1,6 +1,7 @@
 // GET  /api/batches  → all months with counts
 // POST /api/batches  → create or reopen (same folder) a month batch; returns processed file ids for resume
 import { bump } from '../../../lib/cache.js';
+import { buildBaseline } from '../../../lib/baseline.js';
 import { loadAll } from '../../../lib/dataset.js';
 import { OTHER_PROBLEM_TYPES, bad, folderIdFromUrl, json } from '../../../lib/server.js';
 
@@ -19,6 +20,16 @@ export async function onRequestGet({ request, env }) {
 
   // Everything computed from the cached dataset (one D1 row read per call while nothing changed).
   const data = await loadAll(env.DB);
+  // Excel Check result per month (cached per data version).
+  const { rows: xlRows } = await buildBaseline(env.DB);
+  const xl = new Map();
+  for (const r of xlRows) {
+    const c = xl.get(r.batch_id) || xl.set(r.batch_id, { rows: 0, complete: 0, admin: 0, l3: 0, nopdf: 0, novin: 0 }).get(r.batch_id);
+    c.rows++;
+    if (r.band === 'l1' || r.band === 'l2') c.complete++;
+    if (r.complete_by === 'admin') c.admin++;
+    if (['l3', 'nopdf', 'novin'].includes(r.band)) c[r.band]++;
+  }
   const installKey = new Set(data.refs.filter((f) => f.sheet === 'install').map((f) => `${f.batch_id}|${f.vin}`));
   const installVins = new Set(data.refs.filter((f) => f.sheet === 'install').map((f) => f.vin));
   const recVins = new Set(data.records.map((r) => r.vin));
@@ -30,6 +41,7 @@ export async function onRequestGet({ request, env }) {
       + recs.filter((r) => !installKey.has(`${b.id}|${r.vin}`) && installVins.has(r.vin)).length;
     return {
       ...b,
+      excel_check: xl.get(b.id) || { rows: 0, complete: 0, admin: 0, l3: 0, nopdf: 0, novin: 0 },
       record_count: recs.length,
       ocr_mismatch_count: recs.filter((r) => r.vin_photo_match === 0).length,
       open_issue_count: data.issues.filter((i) => i.batch_id === b.id && !i.resolved && OTHER_PROBLEM_TYPES.includes(i.type)).length,
@@ -42,7 +54,7 @@ export async function onRequestGet({ request, env }) {
       excel_problem_count: excelProblems,
       date_wrong_month_count: recs.filter((r) => r.date_month_ok === false).length,
       date_missing_count: recs.filter((r) => !r.install_date).length,
-      // VIN photo not confirmed (level ③, not confirmed by admin, not a scanned page) — "Re-read not-matched photos".
+      // VIN photo not confirmed (level 3, not confirmed by admin, not a scanned page) — "Re-read not-matched photos".
       vin_reread_count: recs.filter((r) => r.vin_level === 3 && !r.vin_confirmed && !r.scanned).length,
     };
   });

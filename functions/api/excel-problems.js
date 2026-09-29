@@ -1,4 +1,4 @@
-// GET /api/excel-problems?batch= — problems in the submission Excel itself (source: ② Check Excel).
+// GET /api/excel-problems?batch= — problems in the submission Excel itself (Issues · Excel side).
 import { excelProblems } from '../../lib/excel-problems.js';
 import { json } from '../../lib/server.js';
 

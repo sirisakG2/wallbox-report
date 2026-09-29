@@ -41,7 +41,8 @@ function matchPill(v) {
   if (v === 0) return '<span class="pill bad">Mismatch</span>';
   return '<span class="pill warn">Not read</span>';
 }
-const LEVEL = { 1: ['ok', '① Match 3/3'], 2: ['warn', '② File = Photo'], 3: ['bad', '③ Not matched'] };
+// PDF VIN check (PDF Data): file name VIN vs photo VIN vs paper VIN box.
+const LEVEL = { 1: ['ok', 'All 3 match'], 2: ['warn', 'Paper differs'], 3: ['bad', 'Photo not confirmed'] };
 function vinLevelPill(level) {
   const [tone, label] = LEVEL[level] || ['neutral', '–'];
   return `<span class="pill ${tone} plain lvl">${label}</span>`;
@@ -51,8 +52,9 @@ function excelPill(status, score, withPct = true) {
   const [tone, label] = XL[status] || ['neutral', '–'];
   return `<span class="pill ${tone} plain lvl">${label}${withPct && status !== 'missing' ? ` ${score}%` : ''}</span>`;
 }
-// Check 2 result (lib/baseline.js): the PDF found by file name in the month folder, then its photo and paper VIN.
-const BAND = { l1: ['ok', '① Match 3/3'], l2: ['warn', '② File + Photo'], l3: ['bad', '③ File only'], nopdf: ['bad', 'No PDF file'], novin: ['bad', '⚠ No valid VIN in Excel'], pdfonly: ['info', 'PDF not in Excel'], noexcel: ['bad', 'Not in Excel'] };
+// Excel Check result per Excel row (lib/baseline.js): the PDF found by file name in the month folder, then its photo
+// and paper VIN. Complete = the photo confirms the VIN (l1, l2 — a wrong paper VIN box is only a note).
+const BAND = { l1: ['ok', 'Complete'], l2: ['ok', 'Complete · paper differs'], l3: ['bad', 'Photo not confirmed'], nopdf: ['bad', 'No PDF'], novin: ['bad', '⚠ No valid VIN'], pdfonly: ['info', 'PDF not in Excel'], noexcel: ['bad', 'Not in Excel'] };
 function matchPct(score, band) {
   const [tone] = BAND[band] || ['neutral'];
   if (band === 'nopdf' || band === 'novin' || band === 'noexcel' || !BAND[band]) return `<span class="pill ${tone} plain lvl">${BAND[band]?.[1] || '–'}</span>`;
@@ -122,6 +124,7 @@ async function loadBatches() {
   $('#cMonths').textContent = batches.length;
   $('#cRecords').textContent = fmtN(batches.reduce((a, b) => a + b.record_count, 0));
   const open = batches.reduce((a, b) => a + b.open_issue_count, 0) + excelProblemCount;
+  state.openIssues = open;
   $('#cIssues').textContent = fmtN(open);
   $('#cIssues').classList.toggle('alert', open > 0);
   return batches;
@@ -142,13 +145,15 @@ function go(name, params = {}) {
 }
 
 const VIEWS = {
-  dashboard: renderDashboard, import: renderMonthsImport, 'check-pdf': renderCheckPdf, 'check-excel': renderCheckExcel,
-  records: renderRecords, compare: renderCompare, issues: renderIssues, months: renderMonthsImport, export: renderExport,
+  dashboard: renderDashboard, import: renderMonthsImport, 'check-excel': renderCheckExcel,
+  records: renderRecords, compare: renderCompare, issues: renderIssues, months: renderMonthsImport,
   manual: renderManual,
 };
 
 async function route() {
-  const { name, params } = parseHash();
+  let { name, params } = parseHash();
+  // Old links: "Check PDF" and "All PDFs" are one menu now (PDF Data).
+  if (name === 'check-pdf') { name = 'records'; }
   const fn = VIEWS[name] || renderDashboard;
   const tabName = name === 'compare' ? 'check-excel' : name === 'import' ? 'months' : VIEWS[name] ? name : 'dashboard';
   $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === tabName));
@@ -172,36 +177,26 @@ async function renderDashboard() {
       <div><h1>Dashboard</h1><p>All imported months at a glance.</p></div>
       <button class="btn primary lg" data-go="import">${ICON.play} Import a month</button>
     </div>
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-head"><h2><span class="tab-num">1</span> Check PDF — file name VIN vs VIN photo vs paper VIN box</h2><span class="faint">file name is the reference</span></div>
-      <div class="grid cols-3 card-pad">
-        ${[1, 2, 3].map((l) => {
-          const n = s.vin_levels[l];
-          const desc = { 1: 'File name = photo = paper VIN box', 2: 'Photo confirms the file name — paper VIN box differs', 3: 'Photo does not confirm the file name — check the PDF' }[l];
-          const tone = { 1: 'ok', 2: 'warn', 3: 'bad' }[l];
-          return `<a class="card kpi kpi-link level-card ${tone}" href="#/check-pdf?vinlevel=${l}" style="box-shadow:none;background:var(--surface-2)">
-            <div class="label">${LEVEL[l][1]}</div>
-            <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.records)}%</span></div>
-            <div class="meter"><i style="width:${pct(n, s.records)}%"></i></div>
-            <div class="sub" style="margin-top:8px">${desc}</div></a>`;
-        }).join('')}
+    <div class="card xl-hero" style="margin-bottom:16px">
+      <div class="card-head"><h2><span class="tab-num">1</span> Excel Check — every Excel row checked against its PDF in the month folder</h2>
+        <a class="btn sm" href="#/check-excel">Open Excel Check</a></div>
+      <div class="xl-hero-top card-pad">
+        <div class="xl-big"><div class="label">Excel rows</div><div class="value">${fmtN(s.baseline.excel_rows)}</div><div class="sub">all months · same count as the Excel files</div></div>
+        <a class="xl-big ok kpi-link" href="#/check-excel?band=complete"><div class="label">Complete</div><div class="value">${fmtN(s.baseline.complete)} <span class="level-pct">${pct(s.baseline.complete, s.baseline.excel_rows)}%</span></div>
+          <div class="sub">by the app ${fmtN(s.baseline.complete - s.baseline.admin)} · <span class="admin-tag">admin</span> ${fmtN(s.baseline.admin)}${s.baseline.l2 ? ` · ${fmtN(s.baseline.l2)} with paper VIN differs` : ''}</div></a>
+        <a class="xl-big bad kpi-link" href="#/check-excel?band=open"><div class="label">Needs attention</div><div class="value">${fmtN(s.baseline.excel_rows - s.baseline.complete)} <span class="level-pct">${pct(s.baseline.excel_rows - s.baseline.complete, s.baseline.excel_rows)}%</span></div><div class="sub">see the reasons below</div></a>
       </div>
-    </div>
-
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-head"><h2><span class="tab-num">2</span> Check Excel — Excel rows as baseline, looked up in the PDFs</h2><span class="faint">Excel VIN → PDF file name in the month folder → photo VIN → paper VIN (name &amp; date low priority)</span></div>
-      <div class="grid cols-5 card-pad">
-        ${[['l1', 'PDF found · photo and paper show the Excel VIN'], ['l2', 'PDF found · photo ✔ · paper VIN differs'], ['l3', 'PDF found · photo not read or different — check'], ['nopdf', 'No PDF file with this VIN in the month folder'], ['novin', 'Excel row with an empty or invalid VIN — fix the Excel']].map(([k, desc]) => {
+      <div class="meter xl-meter"><i style="width:${pct(s.baseline.complete, s.baseline.excel_rows)}%"></i></div>
+      <div class="grid cols-3 card-pad">
+        ${[['l3', 'PDF found, but its VIN photo is unread or shows another VIN — open the PDF and confirm'], ['nopdf', 'No PDF in the month folder has this VIN in its file name'], ['novin', 'The Excel VIN cell is empty or not a VIN — approve a VIN or fix the Excel']].map(([k, desc]) => {
           const n = s.baseline[k];
-          const tone = BAND[k][0];
-          return `<a class="card kpi kpi-link level-card ${tone}" href="#/check-excel?band=${k}" style="box-shadow:none;background:var(--surface-2)">
+          return `<a class="card kpi kpi-link level-card ${n ? 'bad' : 'ok'}" href="#/check-excel?band=${k}" style="box-shadow:none;background:var(--surface-2)">
             <div class="label">${BAND[k][1]}</div>
             <div class="value">${fmtN(n)} <span class="level-pct">${pct(n, s.baseline.excel_rows)}%</span></div>
-            <div class="meter"><i style="width:${pct(n, s.baseline.excel_rows)}%"></i></div>
             <div class="sub" style="margin-top:8px">${desc}</div></a>`;
         }).join('')}
       </div>
-      <div class="legend" style="border-top:1px solid var(--border);border-bottom:0">${fmtN(s.baseline.excel_rows)} Excel rows · <a href="#/check-excel?band=pdfonly">${fmtN(s.baseline.pdfonly)} PDFs not in any Excel</a></div>
+      <div class="legend" style="border-top:1px solid var(--border);border-bottom:0"><a href="#/check-excel?band=pdfonly">${fmtN(s.baseline.pdfonly)} PDFs are not in any Excel</a></div>
     </div>
     <a class="card date-alert ${s.date_wrong_month + s.date_missing ? 'on' : ''}" href="#/records?datemonth=wrong" style="margin-bottom:16px">
       <div><div class="label">Installation date not in the folder month</div>
@@ -209,11 +204,11 @@ async function renderDashboard() {
       <div class="da-num"><b>${fmtN(s.date_wrong_month)}</b><span>other month</span></div>
       <div class="da-num"><b>${fmtN(s.date_missing)}</b><span>no date</span></div>
     </a>
-    <div class="grid cols-4">
-      <div class="card kpi accent"><div class="label">Records</div><div class="value">${fmtN(s.records)}</div><div class="sub">unique VINs · ${fmtN(s.months)} month${s.months === 1 ? '' : 's'}</div></div>
-      <a class="card kpi kpi-link" href="#/records?conf=review"><div class="label">To review</div><div class="value" style="color:${s.to_review ? 'var(--warn)' : 'inherit'}">${fmtN(s.to_review)}</div><div class="sub">VIN or date below 95% · ${fmtN(s.full_conf)} at 100%</div></a>
-      <div class="card kpi"><div class="label">In reference Excel</div><div class="value">${pct(s.matched, s.reference_rows)}%</div><div class="sub">${fmtN(s.matched)} of ${fmtN(s.reference_rows)} rows have a PDF</div></div>
-      <a class="card kpi kpi-link" href="#/issues"><div class="label">Other problems</div><div class="value" style="color:${s.open_issues ? 'var(--warn)' : 'inherit'}">${fmtN(s.open_issues)}</div><div class="sub">edited PDF, duplicates, scans…</div></a>
+    <div class="grid cols-2">
+      <a class="card kpi kpi-link" href="#/issues"><div class="label"><span class="tab-num">2</span> Issues</div><div class="value" style="color:${state.openIssues ? 'var(--warn)' : 'inherit'}">${fmtN(state.openIssues)}</div><div class="sub">open problems to fix or approve — Excel side and PDF side</div></a>
+      <div class="card kpi"><div class="label">PDF Data — VIN decoded from each PDF <span class="faint" style="text-transform:none;letter-spacing:0">(supporting)</span></div>
+        <div class="pdf-levels">${[1, 2, 3].map((l) => `<a class="kpi-link" href="#/records?vinlevel=${l}"><span class="pill ${LEVEL[l][0]} plain lvl">${LEVEL[l][1]}</span> <b>${fmtN(s.vin_levels[l])}</b></a>`).join('')}</div>
+        <div class="sub">${fmtN(s.records)} PDFs · file name VIN vs photo VIN vs paper VIN box</div></div>
     </div>
 
     <div class="grid cols-2 section-gap">
@@ -238,7 +233,6 @@ async function renderDashboard() {
 }
 
 function monthCard(b) {
-  const done = pct(b.processed_count, b.pdf_count);
   return `
     <div class="card month-card" style="box-shadow:none;background:var(--surface-2)">
       <div class="top">
@@ -246,22 +240,21 @@ function monthCard(b) {
         <span class="pill ${STATUS_PILL[b.status] || 'neutral'}">${esc(b.status)}</span>
       </div>
       <div class="stats">
-        <div class="stat"><b>${fmtN(b.record_count)}</b><span>Records</span></div>
-        <div class="stat"><b>${fmtN(b.pdf_count)}</b><span>PDFs</span></div>
-        <div class="stat"><b style="color:${b.ocr_mismatch_count ? 'var(--bad)' : 'inherit'}">${fmtN(b.ocr_mismatch_count)}</b><span>VIN ✘</span></div>
-        <div class="stat"><b style="color:${b.open_issue_count + (b.excel_problem_count || 0) ? 'var(--warn)' : 'inherit'}">${fmtN(b.open_issue_count + (b.excel_problem_count || 0))}</b><span>Problems</span></div>
+        <div class="stat"><b>${fmtN(b.excel_check.rows)}</b><span>Excel rows</span></div>
+        <div class="stat" title="Complete: by the app ${b.excel_check.complete - b.excel_check.admin} · by admin ${b.excel_check.admin}"><b style="color:var(--ok)">${fmtN(b.excel_check.complete)}</b><span>Complete</span></div>
+        <div class="stat" title="Photo not confirmed ${b.excel_check.l3} · No PDF ${b.excel_check.nopdf} · No valid VIN ${b.excel_check.novin}"><b style="color:${b.excel_check.rows - b.excel_check.complete ? 'var(--bad)' : 'inherit'}">${fmtN(b.excel_check.rows - b.excel_check.complete)}</b><span>Needs attention</span></div>
+        <div class="stat"><b style="color:${b.open_issue_count + (b.excel_problem_count || 0) ? 'var(--warn)' : 'inherit'}">${fmtN(b.open_issue_count + (b.excel_problem_count || 0))}</b><span>Issues</span></div>
         <div class="stat" title="Installation date not in ${esc(fmtMonth(b.month, true))}"><b style="color:${b.date_wrong_month_count ? 'var(--bad)' : 'inherit'}">${fmtN(b.date_wrong_month_count || 0)}</b><span>Date ≠ month</span></div>
       </div>
       <div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-3);margin-bottom:6px"><span>Processed ${fmtN(b.processed_count)} / ${fmtN(b.pdf_count)}${b.updated_count ? ` · <span style="color:var(--info)">${fmtN(b.updated_count)} updated</span>` : ''}${b.deleted_count ? ` · <span style="color:var(--bad)">${fmtN(b.deleted_count)} deleted</span>` : ''}</span><span>Reference match ${b.reference_count ? pct(b.matched_count, b.reference_count) : 0}%</span></div>
-        <div class="meter"><i style="width:${done}%"></i></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-3);margin-bottom:6px"><span>Processed ${fmtN(b.processed_count)} / ${fmtN(b.pdf_count)}${b.updated_count ? ` · <span style="color:var(--info)">${fmtN(b.updated_count)} updated</span>` : ''}${b.deleted_count ? ` · <span style="color:var(--bad)">${fmtN(b.deleted_count)} deleted</span>` : ''}</span><span>Complete ${pct(b.excel_check.complete, b.excel_check.rows)}%</span></div>
+        <div class="meter"><i style="width:${pct(b.excel_check.complete, b.excel_check.rows)}%;background:var(--ok)"></i></div>
       </div>
       <div class="row-actions">
         <button class="btn sm primary" data-summary="${b.id}">Summary</button>
-        <button class="btn sm" data-go="records" data-batch="${b.id}">All PDFs</button>
-        <button class="btn sm" data-go="check-pdf" data-batch="${b.id}">Check PDF</button>
-        <button class="btn sm" data-go="check-excel" data-batch="${b.id}">Check Excel</button>
-        <button class="btn sm" data-go="issues" data-batch="${b.id}">Other problems</button>
+        <button class="btn sm" data-go="check-excel" data-batch="${b.id}">Excel Check</button>
+        <button class="btn sm" data-go="issues" data-batch="${b.id}">Issues</button>
+        <button class="btn sm" data-go="records" data-batch="${b.id}">PDF Data</button>
         <button class="btn sm" data-export="${b.id}">${ICON.download} Excel</button>
       </div>
     </div>`;
@@ -292,7 +285,7 @@ function renderImport(params, box = view) {
         <div class="options">
           <label class="check"><input type="checkbox" id="optOcr" checked> Read VIN photo with AI</label>
           <label class="check" title="Files whose VIN photo was not read (e.g. AI allowance ran out) or that failed"><input type="checkbox" id="optRetry" checked> Retry unread / failed files</label>
-          <label class="check" id="optRereadBox" hidden title="Level ③ files not confirmed by an admin: the VIN photo was unread or differs from the file name. Read again with the free reader first, AI only when it still cannot confirm. Admin review is kept."><input type="checkbox" id="optReread"> Re-read VIN photos that are not matched <span class="faint" id="optRereadN"></span></label>
+          <label class="check" id="optRereadBox" hidden title="PDF VIN level 3 files (photo not confirmed) not confirmed by an admin: the VIN photo was unread or differs from the file name. Read again with the free reader first, AI only when it still cannot confirm. Admin review is kept."><input type="checkbox" id="optReread"> Re-read VIN photos that are not matched <span class="faint" id="optRereadN"></span></label>
           <label class="check"><input type="checkbox" id="optReprocess"> Re-process all files</label>
           <label class="check">Test run — only first <input type="number" class="input" id="optLimit" min="0" value="0" style="width:74px;height:32px"> files <span class="faint">(0 = all)</span></label>
           <div style="flex:1"></div>
@@ -434,10 +427,9 @@ function renderImport(params, box = view) {
       const acts = $('#doneActions', el);
       acts.innerHTML = `
         <button class="btn primary" data-summary="${batch.id}">Import summary</button>
-        <button class="btn" data-go="records" data-batch="${batch.id}">All PDFs</button>
-        <button class="btn" data-go="check-pdf" data-batch="${batch.id}">Check PDF</button>
-        <button class="btn" data-go="check-excel" data-batch="${batch.id}">Check Excel</button>
-        <button class="btn" data-go="issues" data-batch="${batch.id}">Other problems</button>
+        <button class="btn" data-go="check-excel" data-batch="${batch.id}">Excel Check</button>
+        <button class="btn" data-go="issues" data-batch="${batch.id}">Issues</button>
+        <button class="btn" data-go="records" data-batch="${batch.id}">PDF Data</button>
         <button class="btn" data-export="${batch.id}">${ICON.download} Download Excel</button>`;
       acts.hidden = false;
       openSummary(batch.id).catch(() => {});
@@ -506,44 +498,6 @@ function wireCheckPage(view, data) {
 const pager = (data) => `<div class="pager"><span>${fmtN(data.total)} record${data.total === 1 ? '' : 's'} · page ${data.page} of ${Math.max(1, Math.ceil(data.total / data.size))}</span>
   <div class="row-actions"><button class="btn sm" id="prevP">← Previous</button><button class="btn sm" id="nextP">Next →</button></div></div>`;
 
-async function renderCheckPdf(params) {
-  const q = new URLSearchParams({ page: Number(params.get('page')) || 1, size: 50 });
-  for (const k of ['batch', 'vinlevel']) if (params.get(k)) q.set(k, params.get(k));
-  const data = await api(`/api/records?${q}`);
-  const all = await api(`/api/records?${new URLSearchParams({ size: 1, ...(params.get('batch') ? { batch: params.get('batch') } : {}) })}`);
-  const f = all.facets.vin;
-  view.innerHTML = `
-    <div class="view-head"><div><h1><span class="tab-num big">1</span> Check PDF</h1>
-      <p>Is the VIN in the <b>file name</b> the same as the VIN <b>inside the PDF</b>? The file name is the reference; the VIN photo must confirm it; the paper VIN box is checked too.</p></div>
-      <button class="btn" data-export="${esc(params.get('batch') || '')}" data-kind="check1">${ICON.download} Export Check 1</button></div>
-    <div class="card">
-      <div class="toolbar">
-        <div class="field"><label>Month</label><select class="select" id="ckBatch">${monthOptions(params.get('batch'))}</select></div>
-        <div class="field grow"><label>Result</label>${checkChips('check-pdf', params, 'vinlevel', [
-          ['1', '① Match 3/3', f[1], 'ok'], ['2', '② File = Photo', f[2], 'warn'], ['3', '③ Not matched', f[3], 'bad']], null, all.total)}</div>
-      </div>
-      <div class="legend"><span>${vinLevelPill(1)} file name = photo = paper</span><span>${vinLevelPill(2)} photo confirms file name, paper box differs</span><span>${vinLevelPill(3)} photo does not confirm file name → open the PDF</span></div>
-      <div class="table-wrap">
-        ${data.records.length ? `<table>
-          <thead><tr><th>Month</th><th>VIN in file name</th><th>VIN photo</th><th>Paper VIN box</th><th>Result</th><th>Read by</th><th>Installed</th><th>Customer</th><th></th></tr></thead>
-          <tbody>${data.records.map((r, i) => `
-            <tr class="clickable" data-i="${i}">
-              <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td>
-              <td class="mono">${esc(r.file_vin) || '<span class="faint">none</span>'}</td>
-              ${photoCell(r)}
-              ${paperCell(r)}
-              <td title="${esc(r.vin_conf_reasons.join(' · '))}">${vinLevelPill(r.vin_level)}</td>
-              <td>${readByPill(r.vin_read_by)}</td>
-              <td class="num">${dateCell(r.install_date, r.install_date_raw, r.month, r.date_month_ok)}</td>
-              <td>${esc(r.customer_name)}</td>
-              <td style="white-space:nowrap"><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">PDF ${ICON.ext}</a></td>
-            </tr>`).join('')}</tbody></table>` : '<div class="empty">Nothing here.</div>'}
-      </div>
-      ${pager(data)}
-    </div>`;
-  wireCheckPage('check-pdf', data);
-}
-
 async function renderCheckExcel(params) {
   const batch = params.get('batch') || '';
   const band = params.get('band') || '';
@@ -554,9 +508,9 @@ async function renderCheckExcel(params) {
   const f = data.facets;
   const monthExcel = state.batches.find((b) => String(b.id) === String(batch));
   const chips = checkChips('check-excel', params, 'band', [
-    ['l1', '① Match 3/3', f.l1, 'ok'], ['l2', '② File + Photo', f.l2, 'warn'], ['l3', '③ File only', f.l3, 'bad'],
-    ['nopdf', 'No PDF file', f.nopdf, 'bad'], ['novin', '⚠ No valid VIN in Excel', f.novin, 'bad'], ['admin', '① completed by admin', f.admin, 'info'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info'],
-    ['wrongmonth', '⚠ Date not in folder month', f.wrongmonth, 'bad']], null, f.excel_rows);
+    ['complete', 'Complete', f.complete, 'ok'], ['l2', '· paper differs', f.l2, 'ok'], ['admin', '· by admin', f.admin, 'info'],
+    ['open', 'Needs attention', f.excel_rows - f.complete, 'bad'], ['l3', 'Photo not confirmed', f.l3, 'bad'], ['nopdf', 'No PDF', f.nopdf, 'bad'], ['novin', '⚠ No valid VIN', f.novin, 'bad'],
+    ['pdfonly', 'PDF not in Excel', f.pdfonly, 'info'], ['wrongmonth', '⚠ Date not in folder month', f.wrongmonth, 'bad']], null, f.excel_rows);
   let table;
   if (band === 'pdfonly') {
     table = data.rows.length ? `<table>
@@ -569,7 +523,7 @@ async function renderCheckExcel(params) {
   } else {
     table = data.rows.length ? `<table class="baseline">
       <thead>
-        <tr class="group"><th colspan="3">Excel (baseline)</th><th colspan="4">① VIN — PDF in the month folder (high priority)</th><th colspan="3">② Name · date (low priority)</th><th></th></tr>
+        <tr class="group"><th colspan="3">Excel (baseline)</th><th colspan="4">VIN evidence — PDF in the month folder (high priority)</th><th colspan="3">Name · date (low priority)</th><th></th></tr>
         <tr><th>Month</th><th>Row</th><th>VIN (key)</th>
           <th>Found PDF file</th><th>Photo VIN</th><th>Paper VIN</th><th>Result</th>
           <th>Customer</th><th>Install date</th><th title="Customer name similarity">Name</th><th></th></tr></thead>
@@ -608,11 +562,12 @@ async function renderCheckExcel(params) {
       }).join('')}</tbody></table>` : '<div class="empty">Nothing here.</div>';
   }
   view.innerHTML = `
-    <div class="view-head"><div><h1><span class="tab-num big">2</span> Check Excel</h1>
-      <p>The <b>Excel of the month folder</b> is the baseline and its <b>VIN is the key</b>. For each row: ① find the PDF in the same folder whose <b>file name</b> has this VIN, then check its <b>photo VIN</b> and <b>paper VIN</b>. ② Name and date are compared with low priority. <b>Result</b>: ① Match 3/3 · ② File + Photo (paper differs) · ③ File only (photo unread/different) · No PDF file. % = file 40 + photo 30 + paper 15 + name 10 + date 5. <span class="date-wrong-inline">Red date</span> = not in the folder month.</p></div>
+    <div class="view-head"><div><h1><span class="tab-num big">1</span> Excel Check</h1>
+      <p>The main check. The <b>Excel of the month folder</b> is the baseline and its <b>VIN is the key</b> — one line per Excel row, same count as the Excel. For each row the app finds the PDF in the same folder whose <b>file name</b> has this VIN, then checks its <b>photo VIN</b> (evidence) and <b>paper VIN</b>; name and date are compared with low priority.
+      <b>Complete</b> = the photo confirms the VIN (a different paper VIN box is only a note) · <b>Needs attention</b> = Photo not confirmed · No PDF · No valid VIN (click the row to approve). % = file 40 + photo 30 + paper 15 + name 10 + date 5. <span class="date-wrong-inline">Red date</span> = not in the folder month.</p></div>
       <div class="row-actions">
         ${monthExcel?.reference_file_id ? `<a class="btn" href="${excelUrl(monthExcel.reference_file_id)}" target="_blank" rel="noopener">Open ${esc(fmtMonth(monthExcel.month))} Excel ${ICON.ext}</a>` : ''}
-        <button class="btn" data-export="${esc(batch)}" data-kind="check2">${ICON.download} Export Check 2</button></div></div>
+        <button class="btn" data-export="${esc(batch)}" data-kind="check2">${ICON.download} Export Excel Check</button></div></div>
     <div class="card">
       <div class="toolbar">
         <div class="field"><label>Month (Excel)</label><select class="select" id="ckBatch">${monthOptions(batch)}</select></div>
@@ -671,8 +626,12 @@ async function renderRecords(params) {
   const pages = Math.max(1, Math.ceil(data.total / data.size));
 
   view.innerHTML = `
-    <div class="view-head"><div><h1>All PDFs</h1><p>Every PDF record with both check results — search anything, filter, and use “Needs review” as the work queue. Click a row to check and confirm.</p></div>
-      <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Export all sheets</button></div>
+    <div class="view-head"><div><h1>PDF Data</h1><p>Supporting data: what the app decoded from each PDF (page 1) — VIN from the file name, the VIN photo and the paper VIN box, date, customer and more. <b>VIN check</b>: ${vinLevelPill(1)} file name = photo = paper · ${vinLevelPill(2)} photo confirms, paper box differs · ${vinLevelPill(3)} photo does not confirm → open the PDF. Click a row to check and confirm.</p></div>
+      <div class="row-actions">
+        <button class="btn" data-export="${esc(params.get('batch') || '')}" data-kind="check1">${ICON.download} Export PDF Data</button>
+        <button class="btn" data-export="${esc(params.get('batch') || '')}">${ICON.download} Full report</button></div></div>
+    <div class="chips-row">${[['', 'All', data.facets?.vin ? Object.values(data.facets.vin).reduce((a, n) => a + n, 0) : data.total, 'neutral'], ['1', LEVEL[1][1], data.facets?.vin?.[1], 'ok'], ['2', LEVEL[2][1], data.facets?.vin?.[2], 'warn'], ['3', LEVEL[3][1], data.facets?.vin?.[3], 'bad']]
+      .map(([v, l, n, tone]) => `<button class="chip chip-${tone} ${(params.get('vinlevel') || '') === v ? 'active' : ''}" data-vinchip="${v}">${esc(l)} <b>${fmtN(n || 0)}</b></button>`).join('')}</div>
     <div class="card">
       <form class="toolbar" id="filters">
         <div class="field"><label>Month</label><select class="select" name="batch">${monthOptions(params.get('batch'))}</select></div>
@@ -686,11 +645,11 @@ async function renderRecords(params) {
         <div class="field"><label>PDF file</label><select class="select" name="fstatus">
           ${[['', 'All'], ['updated', 'Updated'], ['deleted', 'Deleted']].map(([v, l]) => `<option value="${v}" ${(params.get('fstatus') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
-        <div class="field"><label>② Check Excel</label><select class="select" name="xlband">
-          ${[['', 'All'], ['l1', '① Match 3/3'], ['l2', '② File + Photo'], ['l3', '③ File only'], ['noexcel', 'Not in Excel']].map(([v, l]) => `<option value="${v}" ${(params.get('xlband') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        <div class="field"><label>Excel Check</label><select class="select" name="xlband">
+          ${[['', 'All'], ['complete', 'Complete'], ['l2', 'Complete · paper differs'], ['l3', 'Photo not confirmed'], ['noexcel', 'Not in Excel']].map(([v, l]) => `<option value="${v}" ${(params.get('xlband') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
-        <div class="field"><label>① Check PDF</label><select class="select" name="vinlevel">
-          ${[['', 'All'], ['1', '① Match 3/3'], ['2', '② File = Photo'], ['3', '③ Not matched']].map(([v, l]) => `<option value="${v}" ${(params.get('vinlevel') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        <div class="field"><label>VIN check</label><select class="select" name="vinlevel">
+          ${[['', 'All'], ['1', LEVEL[1][1]], ['2', LEVEL[2][1]], ['3', LEVEL[3][1]]].map(([v, l]) => `<option value="${v}" ${(params.get('vinlevel') || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
         <div class="field"><label>Installed from</label><input class="input" type="date" name="from" value="${esc(params.get('from') || '')}"></div>
         <div class="field"><label>to</label><input class="input" type="date" name="to" value="${esc(params.get('to') || '')}"></div>
@@ -699,7 +658,7 @@ async function renderRecords(params) {
       </form>
       <div class="table-wrap">
         ${data.records.length ? `<table>
-          <thead><tr><th>Month</th><th title="VIN from the file name (reference)">VIN (file name)</th><th>① Check PDF</th><th>② Check Excel</th><th>Photo VIN</th><th>Paper VIN</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>Job number</th><th>Customer</th><th>Serial</th><th></th></tr></thead>
+          <thead><tr><th>Month</th><th title="VIN from the file name (reference)">VIN (file name)</th><th>VIN check</th><th>Excel Check</th><th>Photo VIN</th><th>Paper VIN</th><th>Installed</th><th title="How sure the installation date is right">Date %</th><th>Job number</th><th>Customer</th><th>Serial</th><th></th></tr></thead>
           <tbody>${data.records.map((r, i) => `
             <tr class="clickable" data-i="${i}">
               <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td>
@@ -735,6 +694,7 @@ async function renderRecords(params) {
   f.fstatus.onchange = () => go('records', current());
   f.datemonth.onchange = () => go('records', current());
   $('#clearF').onclick = () => go('records');
+  $$('[data-vinchip]').forEach((c) => { c.onclick = () => go('records', { ...current(), vinlevel: c.dataset.vinchip, page: '' }); });
   $('#prevP').onclick = () => go('records', { ...current(), page: page - 1 });
   $('#nextP').onclick = () => go('records', { ...current(), page: page + 1 });
   $$('tbody tr[data-i]').forEach((tr) => { tr.onclick = () => openRecord(data.records[Number(tr.dataset.i)]); });
@@ -763,7 +723,7 @@ function openRecord(r) {
           </div>
         </div>
         <div class="review-box">
-          <div class="review-head"><span>② Check Excel</span>${matchPct(r.xl_score, r.xl_band)}</div>
+          <div class="review-head"><span>Excel Check</span>${matchPct(r.xl_score, r.xl_band)}</div>
           ${r.ref_admin ? `<div class="admin-note">${ADMIN_TAG} Excel row ${esc(r.ref_row)} had ${r.ref_excel_vin_raw ? `“${esc(r.ref_excel_vin_raw)}”` : 'an empty VIN cell'} — this VIN was approved by admin${r.ref_admin_at ? ` on ${esc(String(r.ref_admin_at).slice(0, 16))} UTC` : ''}.<div><b>Remark:</b> ${esc(r.ref_admin_remark)}</div>
             <button class="btn sm" data-unfix="${esc(r.batch_id)}|${esc(r.ref_sheet_name || '')}|${esc(r.ref_row)}">Remove approval</button></div>` : ''}
           ${r.xl_parts ? `<table class="vin-sources">
@@ -865,11 +825,17 @@ async function loadHistory(vin, box) {
 async function openSummary(batchId) {
   const { batch, counts: c, quotaReached } = await api(`/api/batches/${batchId}/summary`);
   const b = String(batch.id);
+  const xc = state.batches.find((x) => x.id === batch.id)?.excel_check || { rows: 0, complete: 0, admin: 0, l3: 0, nopdf: 0, novin: 0 };
   const rows = [
+    ['Excel rows (baseline)', xc.rows, 'neutral', 'Every record in the month Excel', ['check-excel', { batch: b }]],
     ['Records saved', c.saved, 'neutral', 'One record per PDF, keyed by VIN', ['records', { batch: b }]],
-    ['VIN ① Match 3/3', c.vin_l1, 'ok', 'File name = VIN photo = paper VIN box', ['records', { batch: b, vinlevel: '1' }]],
-    ['VIN ② File = Photo', c.vin_l2, 'warn', 'Photo confirms the file name; the paper VIN box differs', ['records', { batch: b, vinlevel: '2' }]],
-    ['VIN ③ Not matched', c.vin_l3, 'bad', 'Photo does not confirm the file name (differs or not readable) — check the PDF', ['records', { batch: b, vinlevel: '3' }]],
+    ['Excel rows — Complete', xc.complete, 'ok', `Photo confirms the Excel VIN · by admin ${fmtN(xc.admin)}`, ['check-excel', { batch: b, band: 'complete' }]],
+    ['Excel rows — Photo not confirmed', xc.l3, 'bad', 'PDF found; its VIN photo is unread or shows another VIN', ['check-excel', { batch: b, band: 'l3' }]],
+    ['Excel rows — No PDF', xc.nopdf, 'bad', 'No PDF in the folder has this VIN in its file name', ['check-excel', { batch: b, band: 'nopdf' }]],
+    ['Excel rows — No valid VIN', xc.novin, 'bad', 'VIN cell empty or not a VIN — approve a VIN or fix the Excel', ['check-excel', { batch: b, band: 'novin' }]],
+    [`PDF VIN — ${LEVEL[1][1]}`, c.vin_l1, 'ok', 'File name = VIN photo = paper VIN box', ['records', { batch: b, vinlevel: '1' }]],
+    [`PDF VIN — ${LEVEL[2][1]}`, c.vin_l2, 'warn', 'Photo confirms the file name; the paper VIN box differs', ['records', { batch: b, vinlevel: '2' }]],
+    [`PDF VIN — ${LEVEL[3][1]}`, c.vin_l3, 'bad', 'Photo does not confirm the file name (differs or not readable) — check the PDF', ['records', { batch: b, vinlevel: '3' }]],
     ['VIN photo not read — AI quota used up', c.unread_quota, 'warn', 'Daily free Workers AI allowance ran out', ['issues', { batch: b, type: 'ocr_failed', q: 'allocation' }]],
     ['Files failed (not saved)', c.failed, 'bad', c.failed_quota ? `${fmtN(c.failed_quota)} of them scanned pages that hit the AI quota` : 'Download or reading errors', ['issues', { batch: b, type: 'error' }]],
     ['Duplicate VIN (same VIN in 2 files)', c.duplicates, 'info', 'Second file kept as an issue — choose which one to keep', ['issues', { batch: b, type: 'duplicate_vin' }]],
@@ -916,7 +882,7 @@ async function openSummary(batchId) {
         <a href="#/records?batch=${b}&fstatus=deleted" data-close-summary><span class="pill bad plain">Deleted ${fmtN(c.deleted_files)}</span></a></dd></div>
       <div class="kv" style="border:0"><dt>VIN photos read by</dt><dd><span class="pill ok plain">Free ${fmtN(c.read_free)}</span> <span class="pill info plain">AI ${fmtN(c.read_ai)}</span></dd></div>
       <div class="row-actions" style="margin-top:8px">
-        <button class="btn" data-sum-go="check-excel">Check Excel</button>
+        <button class="btn" data-sum-go="check-excel">Excel Check</button>
         <button class="btn" data-sum-export>${ICON.download} Download Excel</button>
       </div>
     </div>`;
@@ -997,7 +963,7 @@ async function renderIssues(params) {
   if (text) q.set('q', text);
   if (!showResolved) q.set('resolved', '0');
   const bq = batch ? `batch=${batch}&` : '';
-  const [{ issues: pdfAll }, { issues: openAll }, { problems: excelBase }, { records: wrongRecs }, { records: noDateRecs }, { rows: xlWrong }] = await Promise.all([
+  const [{ issues: pdfAll }, { issues: openAll }, { problems: excelBase }, { records: wrongRecs }, { records: noDateRecs }, { rows: xlWrong, facets: xf }] = await Promise.all([
     api(`/api/issues?${q}`),
     api(`/api/issues?${bq}scope=other&resolved=0`),
     api(`/api/excel-problems${batch ? `?batch=${batch}` : ''}`),
@@ -1032,7 +998,7 @@ async function renderIssues(params) {
   const excelTotal = excelAll.length;
 
   view.innerHTML = `
-    <div class="view-head"><div><h1>Other problems</h1><p>Things the check tables do not show, split by where they come from. Each card explains the problem and what to do — click a card to see those files.</p></div>
+    <div class="view-head"><div><h1><span class="tab-num big">2</span> Issues</h1><p>Everything that stops an Excel row from being Complete, and other problems to fix or approve — from the Excel Check, the Excel file itself (A) and the PDF files (B). Each card explains the problem and what to do — click a card to see those rows.</p></div>
       <button class="btn primary" id="probExport">${ICON.download} Export detailed Excel</button></div>
     <div class="toolbar card" style="border-radius:12px">
       <div class="field"><label>Month</label><select class="select" id="iBatch">${monthOptions(batch)}</select></div>
@@ -1041,7 +1007,32 @@ async function renderIssues(params) {
       <label class="check" style="height:40px"><input type="checkbox" id="iResolved" ${showResolved ? 'checked' : ''}> Show resolved</label>
     </div>
 
-    <div class="src-head src-pdf"><span class="tab-num">1</span> From Check PDF <small>— found while reading the PDF files · ${fmtN(pdfTotal)} open</small></div>
+    <div class="src-head src-excel"><span class="tab-num">1</span> From Excel Check <small>— Excel rows that are not Complete yet (work on them in Excel Check)</small></div>
+    <div class="xl-strip">${[['l3', 'Photo not confirmed', 'PDF found; open it and confirm the photo VIN'], ['nopdf', 'No PDF', 'No PDF in the folder with this VIN in its file name'], ['novin', '⚠ No valid VIN', 'Approve a VIN for the Excel row'], ['pdfonly', 'PDF not in Excel', 'PDF in the folder that no Excel row points to']]
+      .map(([k, l, d]) => `<a class="card kpi kpi-link level-card ${xf[k] ? (k === 'pdfonly' ? 'warn' : 'bad') : 'ok'}" href="#/check-excel?${batch ? `batch=${batch}&` : ''}band=${k}"><div class="label">${l}</div><div class="value">${fmtN(xf[k] || 0)}</div><div class="sub">${d}</div></a>`).join('')}</div>
+
+    <div class="src-head src-excel"><span class="tab-num">A</span> Excel side <small>— found in the submission Excel · ${fmtN(excelTotal)} to fix in the Excel or approve</small></div>
+    <div class="problem-cards">${EXCEL_PROBLEM_TYPES.map(card).join('')}</div>
+    ${type && !isExcelType ? '' : `<div class="card section-gap">
+      <div class="table-wrap">
+        ${excelList.length ? `<table>
+          <thead><tr><th>Problem</th><th>Month</th><th>Excel row</th><th>VIN in Excel</th><th>Customer (Excel)</th><th>Suggested PDF</th><th>What to do</th><th></th></tr></thead>
+          <tbody>${excelList.map((x) => `
+            <tr>
+              <td><span class="src-tag excel">Excel</span> <span class="pill ${info(x.type).tone}">${esc(info(x.type).name)}</span></td>
+              <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
+              <td class="num">${esc(x.sheet_name)} · ${esc(x.row_no)}</td>
+              <td class="mono bad-cell">${esc(x.excel_vin)}</td>
+              <td>${esc(x.customer_name)}</td>
+              <td>${x.suggestion ? `<div class="stack"><span class="mono">${esc(x.suggestion.vin)}</span><small>${esc(x.suggestion.how)} · ${esc(fmtMonth(x.suggestion.month))}</small></div>` : '<span class="faint">no match found</span>'}</td>
+              <td style="max-width:320px" class="muted">${esc(info(x.type).action)}</td>
+              <td style="white-space:nowrap">${x.type === 'excel_no_vin' || x.type === 'excel_bad_vin' ? `<a class="btn sm primary" href="#/check-excel?batch=${x.batch_id}&band=novin" title="Open Excel Check and click the row to approve a VIN">Approve…</a> ` : ''}${x.excel_file_id ? `<a href="${excelUrl(x.excel_file_id)}" target="_blank" rel="noopener">Excel ${ICON.ext}</a>` : ''}${x.suggestion?.pdf_file_id ? ` · <a href="${pdfUrl(x.suggestion.pdf_file_id)}" target="_blank" rel="noopener">PDF ${ICON.ext}</a>` : ''}</td>
+            </tr>`).join('')}</tbody></table>` : '<div class="empty">No problems in the Excel here — nice.</div>'}
+      </div>
+      <div class="pager"><span>${fmtN(excelList.length)} Excel problem${excelList.length === 1 ? '' : 's'} · fix them in the Excel file, then import the month again</span></div>
+    </div>`}
+
+    <div class="src-head src-pdf section-gap"><span class="tab-num">B</span> PDF side <small>— found while decoding the PDF files · ${fmtN(pdfTotal)} open</small></div>
     <div class="problem-cards">${[...DATE_PROBLEM_TYPES, ...PROBLEM_TYPES].map(card).join('')}</div>
     ${isExcelType ? '' : `<div class="card section-gap">
       <div class="table-wrap">
@@ -1049,7 +1040,7 @@ async function renderIssues(params) {
           <thead><tr><th>Problem</th><th>Month</th><th>VIN</th><th>What happened</th><th>What to do</th><th>PDF</th><th style="text-align:right">Action</th></tr></thead>
           <tbody>${dateList.map((d) => `
             <tr>
-              <td><span class="src-tag pdf">①</span> <span class="pill bad">${esc(info(d.type).name)}</span></td>
+              <td><span class="src-tag pdf">PDF</span> <span class="pill bad">${esc(info(d.type).name)}</span></td>
               <td><span class="month-chip">${esc(fmtMonth(d.rec.month))}</span></td>
               <td class="mono">${esc(d.rec.vin)}</td>
               <td style="max-width:380px"><span class="date-wrong-inline">${esc(d.what)}</span></td>
@@ -1061,7 +1052,7 @@ async function renderIssues(params) {
               </td>
             </tr>`).join('')}${pdfIssues.map((i) => `
             <tr style="${i.resolved ? 'opacity:.5' : ''}">
-              <td><span class="src-tag pdf">①</span> <span class="pill ${info(i.type).tone}">${esc(info(i.type).name)}</span></td>
+              <td><span class="src-tag pdf">PDF</span> <span class="pill ${info(i.type).tone}">${esc(info(i.type).name)}</span></td>
               <td><span class="month-chip">${esc(fmtMonth(i.month))}</span></td>
               <td class="mono">${esc(i.vin)}</td>
               <td style="max-width:380px">${esc(whatHappened(i))}</td>
@@ -1074,27 +1065,6 @@ async function renderIssues(params) {
             </tr>`).join('')}</tbody></table>` : '<div class="empty">No problems from the PDFs here — nice.</div>'}
       </div>
       <div class="pager"><span>${fmtN(pdfIssues.length + dateList.length)} problem${pdfIssues.length + dateList.length === 1 ? '' : 's'} from the PDFs</span></div>
-    </div>`}
-
-    <div class="src-head src-excel"><span class="tab-num">2</span> From Check Excel <small>— found in the submission Excel · ${fmtN(excelTotal)} to fix in the Excel</small></div>
-    <div class="problem-cards">${EXCEL_PROBLEM_TYPES.map(card).join('')}</div>
-    ${type && !isExcelType ? '' : `<div class="card section-gap">
-      <div class="table-wrap">
-        ${excelList.length ? `<table>
-          <thead><tr><th>Problem</th><th>Month</th><th>Excel row</th><th>VIN in Excel</th><th>Customer (Excel)</th><th>Suggested PDF</th><th>What to do</th><th></th></tr></thead>
-          <tbody>${excelList.map((x) => `
-            <tr>
-              <td><span class="src-tag excel">②</span> <span class="pill ${info(x.type).tone}">${esc(info(x.type).name)}</span></td>
-              <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
-              <td class="num">${esc(x.sheet_name)} · ${esc(x.row_no)}</td>
-              <td class="mono bad-cell">${esc(x.excel_vin)}</td>
-              <td>${esc(x.customer_name)}</td>
-              <td>${x.suggestion ? `<div class="stack"><span class="mono">${esc(x.suggestion.vin)}</span><small>${esc(x.suggestion.how)} · ${esc(fmtMonth(x.suggestion.month))}</small></div>` : '<span class="faint">no match found</span>'}</td>
-              <td style="max-width:320px" class="muted">${esc(info(x.type).action)}</td>
-              <td style="white-space:nowrap">${x.excel_file_id ? `<a href="${excelUrl(x.excel_file_id)}" target="_blank" rel="noopener">Excel ${ICON.ext}</a>` : ''}${x.suggestion?.pdf_file_id ? ` · <a href="${pdfUrl(x.suggestion.pdf_file_id)}" target="_blank" rel="noopener">PDF ${ICON.ext}</a>` : ''}</td>
-            </tr>`).join('')}</tbody></table>` : '<div class="empty">No problems in the Excel here — nice.</div>'}
-      </div>
-      <div class="pager"><span>${fmtN(excelList.length)} Excel problem${excelList.length === 1 ? '' : 's'} · fix them in the Excel file, then import the month again</span></div>
     </div>`}`;
 
   const nav = (extra = {}) => go('issues', { batch: $('#iBatch').value, type, q: text, resolved: $('#iResolved').checked ? 'all' : '', ...extra });
@@ -1177,30 +1147,6 @@ async function renderMonths(params, box = view) {
   });
 }
 
-// ---------- Export ----------
-function renderExport(params) {
-  view.innerHTML = `
-    <div class="view-head"><div><h1>Export</h1><p>Download an Excel file built from the stored data.</p></div></div>
-    <div class="grid cols-2">
-      <div class="card card-pad">
-        <div class="field" style="max-width:360px"><label>Months</label><select class="select" id="eBatch">${monthOptions(params.get('batch'))}</select></div>
-        <div class="field" style="max-width:360px;margin-top:16px"><label>What</label><select class="select" id="eKind">
-          <option value="all">All sheets</option><option value="check1">① Check PDF only</option><option value="check2">② Check Excel only</option></select></div>
-        <div style="margin-top:22px"><button class="btn primary lg" id="eGo">${ICON.download} Download Excel</button></div>
-      </div>
-      <div class="card card-pad">
-        <h2 style="margin:0 0 12px;font-size:15px">Sheets</h2>
-        <dl style="margin:0">
-          <div class="kv"><dt>PDF</dt><dd>One row per PDF: all fields, ① result, ② % match, date %, links (All sheets)</dd></div>
-          <div class="kv"><dt>Check 1 · PDF</dt><dd>VIN in file name vs photo vs paper box, result ①②③ and why</dd></div>
-          <div class="kv"><dt>Check 2 · Excel baseline</dt><dd>Every Excel row with ✔/✘ per field and % match</dd></div>
-          <div class="kv"><dt>Other problems</dt><dd>Edited PDF, duplicate VIN, scanned page, charger photo, failed files (All sheets)</dd></div>
-          <div class="kv" style="border:0"><dt>Summary</dt><dd>Counts for the export</dd></div>
-        </dl>
-      </div>
-    </div>`;
-  $('#eGo').onclick = () => exportExcel($('#eBatch').value, $('#eKind').value);
-}
 
 async function exportExcel(batchId, kind = 'all') {
   if (!window.ExcelJS) { toast('Excel library is still loading, try again', 'err'); return; }
@@ -1291,7 +1237,7 @@ function openExcelFix(x) {
           </div>
         </div>
         <form id="fixForm" class="fix-form">
-          <div class="label-sm">Approve — this Excel row uses the VIN below and becomes <b>① Match 3/3 (completed by admin)</b></div>
+          <div class="label-sm">Approve — this Excel row uses the VIN below and becomes <b>Complete (by admin)</b></div>
           <div class="field"><label>VIN to use (must be the file name VIN of a PDF in this month folder)</label>
             <input class="input mono" name="vin" value="${esc(sg ? sg.file_vin || sg.vin : '')}" maxlength="20" autocomplete="off" spellcheck="false" required></div>
           <div class="field"><label>Remark (required — why this VIN is correct)</label>
@@ -1311,7 +1257,7 @@ function openExcelFix(x) {
     const f = new FormData(e.target);
     try {
       await api('/api/excel-fixes', { method: 'POST', body: { batch_id: x.batch_id, sheet_name: x.sheet_name, row_no: x.row_no, vin: f.get('vin'), remark: f.get('remark') } });
-      await afterReview(`Excel row ${x.row_no} approved — ① Match 3/3 (admin)`);
+      await afterReview(`Excel row ${x.row_no} approved — Complete (by admin)`);
     } catch (err) { toast(err.message, 'err'); }
   };
 }

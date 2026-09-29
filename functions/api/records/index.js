@@ -46,6 +46,7 @@ export async function onRequestGet({ request, env }) {
   if (['match', 'close', 'different', 'missing'].includes(excel)) rows = rows.filter((r) => r.excel_status === excel);
   const xlband = p.get('xlband');
   if (['l1', 'l2', 'l3', 'noexcel'].includes(xlband)) rows = rows.filter((r) => r.xl_band === xlband);
+  else if (xlband === 'complete') rows = rows.filter((r) => r.xl_band === 'l1' || r.xl_band === 'l2');
   const level = Number(p.get('vinlevel'));
   if (level >= 1 && level <= 3) rows = rows.filter((r) => r.vin_level === level);
 
