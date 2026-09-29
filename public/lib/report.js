@@ -19,7 +19,7 @@ const photoAdmin = (r) => !!(r.vin_confirmed && r.file_vin);
 const paperAdmin = (r) => !!(r.paper_confirmed && r.file_vin);
 const photoText = (r) => (photoAdmin(r) ? `${r.vin_picture || 'not read'} → ✔ admin confirmed ${r.file_vin}` : r.vin_picture || (r.charger_photo ? 'charger photo' : 'not read'));
 const paperText = (r) => (paperAdmin(r) ? `${r.paper_vin || 'not readable'} → ✔ admin confirmed ${r.file_vin}` : r.paper_vin || '');
-const adminText = (r) => [photoAdmin(r) && 'Photo VIN', paperAdmin(r) && 'Paper VIN', r.date_confirmed && 'Install date', r.name_confirmed && 'Customer name'].filter(Boolean).join(', ');
+const adminText = (r) => [r.ref_admin && `Excel VIN (row ${r.ref_row})`, photoAdmin(r) && 'Photo VIN', paperAdmin(r) && 'Paper VIN', r.date_confirmed && 'Install date', r.name_confirmed && 'Customer name'].filter(Boolean).join(', ');
 function vinFills(row, r, photoKey = 'vin_picture', paperKey = 'paper_vin') {
   if (photoAdmin(r)) row.getCell(photoKey).fill = ADMIN_FILL;
   else if (r.vin_picture !== r.file_vin) row.getCell(photoKey).fill = RED_FILL;
@@ -73,6 +73,8 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     { header: 'Photo VIN', key: 'vin_picture', width: 24 },
     { header: 'Paper VIN', key: 'paper_vin', width: 24 },
     { header: 'Confirmed by admin', key: 'admin', width: 22 },
+    { header: '② Completed by', key: 'complete_by', width: 13 },
+    { header: 'Admin remark', key: 'admin_remark', width: 40 },
     { header: 'Excel row', key: 'ref_row_text', width: 16 },
     { header: 'Excel name (col D)', key: 'ref_name', width: 30 },
     { header: 'Installation date', key: 'install_date', width: 14, style: dateCol },
@@ -112,6 +114,8 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     _raw: r,
     vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
     vin_picture: photoText(r), paper_vin: paperText(r), admin: adminText(r),
+    complete_by: r.xl_band !== 'l1' ? '' : r.ref_admin || photoAdmin(r) || paperAdmin(r) ? 'Admin' : 'App (auto)',
+    admin_remark: r.ref_admin ? `Excel VIN cell "${r.ref_excel_vin_raw || '(empty)'}" → ${r.vin}: ${r.ref_admin_remark}` : '',
     match: flagText(r.vin_photo_match),
     install_date: toDate(r.install_date),
     job_url: urlLink(r.job_url),
@@ -128,6 +132,7 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     dc.fill = r.date_conf >= 95 ? GREEN_FILL : r.date_conf >= 80 ? AMBER_FILL : RED_FILL;
     row.getCell('vin_level_label').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
     vinFills(row, r);
+    if (m.complete_by === 'Admin') { row.getCell('complete_by').fill = ADMIN_FILL; row.getCell('admin_remark').fill = ADMIN_FILL; }
     if (r.vin_level === 3 || r.xl_band === 'l3' || r.xl_band === 'noexcel' || r.date_conf < 95) row.getCell('needs_review').fill = AMBER_FILL;
     if (r.file_status === 'deleted') row.getCell('file_status_text').fill = RED_FILL;
     if (r.file_status === 'updated') row.getCell('file_status_text').fill = AMBER_FILL;
@@ -192,6 +197,8 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     { header: 'Paper = Excel VIN', key: 'vin_paper', width: 10 },
     { header: 'Confirmed by admin', key: 'admin', width: 22 },
     { header: '% match', key: 'score', width: 9 },
+    { header: 'Completed by', key: 'complete_by', width: 13 },
+    { header: 'Admin remark', key: 'admin_remark', width: 50 },
     { header: 'Customer (Excel)', key: 'customer_name', width: 30 },
     { header: 'Customer (PDF)', key: 'pdf_name', width: 30 },
     { header: 'Name %', key: 'name', width: 9 },
@@ -220,6 +227,8 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     score: x.score / 100,
     pdf_name: x.record?.customer_name || '', pdf_job: x.record?.job_number || '', pdf_date: toDate(x.record?.install_date),
     pdf_link: driveLink(x.record?.pdf_file_id || x.suggestion?.pdf_file_id), hint: x.hint || '',
+    complete_by: x.complete_by === 'admin' ? 'Admin' : x.complete_by === 'app' ? 'App (auto)' : '',
+    admin_remark: x.admin_remark || '',
   })), (row, x) => {
     const fill = x.band === 'l1' ? GREEN_FILL : x.band === 'l2' ? AMBER_FILL : RED_FILL;
     if (x.invalid_vin) { // special issue: highlight the whole row
@@ -238,6 +247,7 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     if (x.record && photoAdmin(x.record)) row.getCell('photo_vin').fill = ADMIN_FILL;
     if (x.record && paperAdmin(x.record)) row.getCell('paper_vin').fill = ADMIN_FILL;
     if (x.record && adminText(x.record)) row.getCell('admin').fill = ADMIN_FILL;
+    if (x.complete_by === 'Admin') { row.getCell('complete_by').fill = ADMIN_FILL; row.getCell('admin_remark').fill = ADMIN_FILL; row.getCell('level').value = '① Match 3/3 (admin)'; }
     if (x.parts && x.parts.date_days) row.getCell('date').fill = AMBER_FILL;
     if (x.parts && x.parts.name < 80) row.getCell('name').fill = AMBER_FILL;
     if (x.excel_month_ok === false) { row.getCell('excel_month').fill = RED_FILL; row.getCell('install_date').fill = RED_FILL; }
@@ -290,6 +300,8 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     ['Check 2 · ③ File only (photo unread / different)', base.facets.l3],
     ['Check 2 · No PDF file with this VIN in the folder', base.facets.nopdf],
     ['Check 2 · ⚠ Excel row with no valid VIN (empty / text / typo)', base.facets.novin],
+    ['Check 2 · ① completed by the app (auto)', base.facets.l1 - base.facets.admin],
+    ['Check 2 · ① completed by admin (see "Admin remark")', base.facets.admin],
     ['Check 2 · PDF not in Excel', base.facets.pdfonly],
   );
   if (want.problems) lines.push(['Other problems (open)', issues.filter((i) => !i.resolved).length]);

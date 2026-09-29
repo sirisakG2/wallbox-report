@@ -555,7 +555,7 @@ async function renderCheckExcel(params) {
   const monthExcel = state.batches.find((b) => String(b.id) === String(batch));
   const chips = checkChips('check-excel', params, 'band', [
     ['l1', '① Match 3/3', f.l1, 'ok'], ['l2', '② File + Photo', f.l2, 'warn'], ['l3', '③ File only', f.l3, 'bad'],
-    ['nopdf', 'No PDF file', f.nopdf, 'bad'], ['novin', '⚠ No valid VIN in Excel', f.novin, 'bad'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info'],
+    ['nopdf', 'No PDF file', f.nopdf, 'bad'], ['novin', '⚠ No valid VIN in Excel', f.novin, 'bad'], ['admin', '① completed by admin', f.admin, 'info'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info'],
     ['wrongmonth', '⚠ Date not in folder month', f.wrongmonth, 'bad']], null, f.excel_rows);
   let table;
   if (band === 'pdfonly') {
@@ -579,11 +579,11 @@ async function renderCheckExcel(params) {
         const photo = r ? (r.vin_confirmed ? (r.file_vin || r.vin) : r.vin_picture) : '';
         if (x.invalid_vin) {
           const sg = x.suggestion;
-          return `<tr class="row-alert ${sg ? 'clickable' : ''}" data-vin="${esc(sg?.vin || '')}">
+          return `<tr class="row-alert clickable" data-fix="${data.rows.indexOf(x)}" title="Click to review and approve a VIN for this Excel row">
           <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
           <td class="num faint">${esc(x.row_no)}</td>
           <td class="mono bad-mark">${x.vin ? esc(x.vin) : '<i>(empty)</i>'}</td>
-          <td colspan="3"><span class="bad-mark"><b>⚠ No valid VIN in Excel</b></span><div class="faint" style="font-size:11.5px">${esc(x.hint)}</div>${sg ? `<a href="${pdfUrl(sg.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:12px">Suggested PDF ${ICON.ext}</a>` : ''}</td>
+          <td colspan="3"><span class="bad-mark"><b>⚠ No valid VIN in Excel</b></span> <span class="faint" style="font-size:11.5px">· click to approve</span><div class="faint" style="font-size:11.5px">${esc(x.hint)}</div>${sg ? `<a href="${pdfUrl(sg.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:12px">Suggested PDF ${ICON.ext}</a>` : ''}</td>
           <td>${matchPct(0, 'novin')}</td>
           <td>${esc(x.customer_name)}</td>
           <td class="num">${dateCell(x.install_date, '', x.month, x.excel_month_ok)}</td>
@@ -594,12 +594,12 @@ async function renderCheckExcel(params) {
         return `<tr class="${r ? 'clickable' : ''}" data-vin="${esc(r?.vin || '')}">
           <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
           <td class="num faint">${esc(x.row_no)}</td>
-          <td class="mono">${esc(x.vin)}</td>
+          <td class="mono">${esc(x.vin)}${x.admin_fix ? `<div class="faint" style="font-size:11px">Excel: ${esc(x.excel_vin_raw || '(empty)')}</div>` : ''}</td>
           ${r ? `<td style="max-width:260px"><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${esc(r.pdf_name)}">${esc(r.pdf_name.length > 38 ? `${r.pdf_name.slice(0, 38)}…` : r.pdf_name)} ${ICON.ext}</a></td>
             <td class="mono ${pt.vin_photo ? '' : 'bad-mark'}">${pt.vin_photo ? '✔' : esc(photo || 'not read')}${r.vin_confirmed ? ` ${ADMIN_TAG}` : ''}</td>
             <td class="mono ${pt.vin_paper ? '' : 'warn-mark'}">${pt.vin_paper ? '✔' : esc(r.paper_vin || 'not readable')}${r.paper_confirmed ? ` ${ADMIN_TAG}` : ''}</td>`
             : `<td colspan="3"><span class="bad-mark">No PDF file with this VIN in the folder</span>${x.hint ? `<div class="faint" style="font-size:11.5px">${esc(x.hint)}</div>` : ''}</td>`}
-          <td>${matchPct(x.score, x.band)}</td>
+          <td>${matchPct(x.score, x.band)}${x.complete_by === 'admin' ? ` ${ADMIN_TAG}<div class="faint" style="font-size:11px;max-width:220px" title="${esc(x.admin_remark)}">${esc(x.admin_remark.length > 70 ? `${x.admin_remark.slice(0, 70)}…` : x.admin_remark)}</div>` : ''}</td>
           <td>${esc(x.customer_name)}${r && pt.name < 95 ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.customer_name)}</div>` : ''}</td>
           <td class="num">${dateCell(x.install_date, '', x.month, x.excel_month_ok)}${r && (pt.date_days || x.pdf_month_ok === false) ? `<div class="faint" style="font-size:11.5px">PDF: ${dateCell(r.install_date, r.install_date_raw, x.month, x.pdf_month_ok)}</div>` : ''}</td>
           <td class="num ${!r ? '' : pt.name >= 95 ? 'ok-mark' : pt.name >= 80 ? 'warn-mark' : 'bad-mark'}">${r ? `${pt.name}%` : ''}</td>
@@ -622,6 +622,7 @@ async function renderCheckExcel(params) {
       ${pager({ total: data.total, page: data.page, size: data.size })}
     </div>`;
   wireCheckPage('check-excel', { ...data, records: [] });
+  $$('tbody tr[data-fix]').forEach((tr) => { tr.onclick = () => openExcelFix(data.rows[Number(tr.dataset.fix)]); });
   $$('tbody tr[data-vin]').forEach((tr) => {
     if (!tr.dataset.vin) return;
     tr.onclick = async () => {
@@ -763,6 +764,8 @@ function openRecord(r) {
         </div>
         <div class="review-box">
           <div class="review-head"><span>② Check Excel</span>${matchPct(r.xl_score, r.xl_band)}</div>
+          ${r.ref_admin ? `<div class="admin-note">${ADMIN_TAG} Excel row ${esc(r.ref_row)} had ${r.ref_excel_vin_raw ? `“${esc(r.ref_excel_vin_raw)}”` : 'an empty VIN cell'} — this VIN was approved by admin${r.ref_admin_at ? ` on ${esc(String(r.ref_admin_at).slice(0, 16))} UTC` : ''}.<div><b>Remark:</b> ${esc(r.ref_admin_remark)}</div>
+            <button class="btn sm" data-unfix="${esc(r.batch_id)}|${esc(r.ref_sheet_name || '')}|${esc(r.ref_row)}">Remove approval</button></div>` : ''}
           ${r.xl_parts ? `<table class="vin-sources">
             <tr><td>Excel row</td><td colspan="2">${r.ref_sheet_name ? `“${esc(r.ref_sheet_name)}” ` : ''}row ${esc(r.ref_row || '?')}</td></tr>
             <tr><td>VIN (Excel)</td><td class="mono" colspan="2">${esc(r.vin)}</td></tr>
@@ -837,8 +840,8 @@ function openRecord(r) {
 }
 
 // ---------- record transaction history ----------
-const FIELD_LABEL = { vin: 'VIN', vin_picture: 'Photo VIN', paper_vin: 'Paper VIN box', install_date: 'Installation date', customer_name: 'Customer name', file: 'PDF file' };
-const ACTION_LABEL = { confirm: 'Confirmed', correct: 'Corrected', updated: 'Updated in Drive', deleted: 'Deleted from Drive', restored: 'Back in Drive' };
+const FIELD_LABEL = { vin: 'VIN', vin_picture: 'Photo VIN', paper_vin: 'Paper VIN box', excel_vin: 'Excel VIN (admin approval)', install_date: 'Installation date', customer_name: 'Customer name', file: 'PDF file' };
+const ACTION_LABEL = { approve: 'Approved', unapprove: 'Approval removed', confirm: 'Confirmed', correct: 'Corrected', updated: 'Updated in Drive', deleted: 'Deleted from Drive', restored: 'Back in Drive' };
 // Stored times are UTC ("YYYY-MM-DD HH:MM:SS") → local "dd/mm/yyyy HH:MM".
 function localTime(at) {
   const d = new Date(`${String(at).replace(' ', 'T')}Z`);
@@ -1245,6 +1248,82 @@ function editDate(vin, current) {
 }
 
 // After a confirm/correct: refresh, and in "Needs review" mode open the next record to check.
+// Check 2 — Excel row without a valid VIN: summary, suggested PDF, approve a VIN with a remark.
+function openExcelFix(x) {
+  const sg = x.suggestion;
+  const back = document.createElement('div');
+  back.className = 'drawer-backdrop';
+  const d = document.createElement('aside');
+  d.className = 'drawer';
+  const kv = (rows) => `<dl style="margin:0">${rows.map(([k, v]) => `<div class="kv"><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+  d.innerHTML = `
+    <div class="drawer-head"><div>
+        <div class="month-line"><span class="month-badge">${esc(fmtMonth(x.month, true).toUpperCase())}</span><span class="pill bad">⚠ No valid VIN in Excel</span></div>
+        <h2>${esc(x.customer_name || `Excel row ${x.row_no}`)}</h2>
+        <div class="faint" style="font-size:12.5px;margin-top:3px">Excel “${esc(x.sheet_name)}” row ${esc(x.row_no)}</div></div>
+      <button class="icon-btn" aria-label="Close">✕</button></div>
+    <div class="drawer-body">
+      <div class="review">
+        <div class="review-top"><span class="label-sm">Summary</span>
+          ${x.excel_file_id ? `<a class="btn sm" href="${excelUrl(x.excel_file_id)}" target="_blank" rel="noopener">Open Excel ${ICON.ext}</a>` : ''}</div>
+        <div class="review-grid">
+          <div class="review-box">
+            <div class="review-head"><span>Excel row (baseline)</span></div>
+            ${kv([
+              ['VIN cell', `<span class="mono bad-mark">${x.vin ? esc(x.vin) : '<i>(empty)</i>'}</span>`],
+              ['Customer', esc(x.customer_name) || '–'],
+              ['Case number', `<span class="mono">${esc(x.case_number) || '–'}</span>`],
+              ['Install date', dateCell(x.install_date, '', x.month, x.excel_month_ok)],
+              ['Problem', esc(x.hint)],
+            ])}
+          </div>
+          <div class="review-box">
+            <div class="review-head"><span>Suggested PDF</span>${sg ? '<span class="pill info plain">same customer name</span>' : ''}</div>
+            ${sg ? kv([
+              ['PDF file', `<a href="${pdfUrl(sg.pdf_file_id)}" target="_blank" rel="noopener">${esc(sg.pdf_name)} ${ICON.ext}</a>`],
+              ['VIN (file name)', `<span class="mono">${esc(sg.file_vin || sg.vin)}</span>`],
+              ['Photo VIN', `<span class="mono">${esc(sg.vin_picture) || 'not read'}</span> ${sg.vin_picture === (sg.file_vin || sg.vin) || sg.vin_confirmed ? '<span class="ok-mark">✔</span>' : '<span class="bad-mark">✘</span>'}`],
+              ['Paper VIN', `<span class="mono">${esc(sg.paper_vin) || 'not read'}</span> ${sg.paper_vin === (sg.file_vin || sg.vin) || sg.paper_confirmed ? '<span class="ok-mark">✔</span>' : '<span class="warn-mark">✘</span>'}`],
+              ['Customer (PDF)', esc(sg.customer_name)],
+              ['Install date (PDF)', esc(fmtDate(sg.install_date)) || '–'],
+              ['Job number', `<span class="mono">${esc(sg.job_number) || '–'}</span>`],
+            ]) : '<div class="faint" style="font-size:12.5px">No PDF in this folder has the same customer name. Find the PDF in the folder and type its VIN below.</div>'}
+          </div>
+        </div>
+        <form id="fixForm" class="fix-form">
+          <div class="label-sm">Approve — this Excel row uses the VIN below and becomes <b>① Match 3/3 (completed by admin)</b></div>
+          <div class="field"><label>VIN to use (must be the file name VIN of a PDF in this month folder)</label>
+            <input class="input mono" name="vin" value="${esc(sg ? sg.file_vin || sg.vin : '')}" maxlength="20" autocomplete="off" spellcheck="false" required></div>
+          <div class="field"><label>Remark (required — why this VIN is correct)</label>
+            <textarea class="input" name="remark" rows="3" maxlength="500" required placeholder="e.g. Installed before car delivery; VIN checked in the PDF photo and with the customer">${x.vin && !/\d/.test(x.vin) ? esc(`Excel VIN cell says "${x.vin}"; `) : ''}</textarea></div>
+          <div class="row-actions"><button class="btn primary" type="submit">✔ Approve (Complete)</button></div>
+        </form>
+      </div>
+    </div>`;
+  const close = () => { back.remove(); d.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  back.onclick = close;
+  $('.icon-btn', d).onclick = close;
+  document.addEventListener('keydown', onKey);
+  document.body.append(back, d);
+  $('#fixForm', d).onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      await api('/api/excel-fixes', { method: 'POST', body: { batch_id: x.batch_id, sheet_name: x.sheet_name, row_no: x.row_no, vin: f.get('vin'), remark: f.get('remark') } });
+      await afterReview(`Excel row ${x.row_no} approved — ① Match 3/3 (admin)`);
+    } catch (err) { toast(err.message, 'err'); }
+  };
+}
+
+async function removeExcelFix(batchId, sheetName, rowNo) {
+  if (!confirm(`Remove the admin approval of Excel row ${rowNo}? The row goes back to "No valid VIN in Excel".`)) return;
+  try {
+    await api('/api/excel-fixes', { method: 'DELETE', body: { batch_id: batchId, sheet_name: sheetName, row_no: rowNo } });
+    await afterReview('Approval removed');
+  } catch (err) { toast(err.message, 'err'); }
+}
+
 async function afterReview(message) {
   $$('.drawer, .drawer-backdrop').forEach((x) => x.remove());
   toast(message);
@@ -1335,6 +1414,8 @@ document.addEventListener('click', (e) => {
   if (en) { e.preventDefault(); editName(en.dataset.editName); return; }
   const cv = e.target.closest('[data-confirm-vin]');
   if (cv) { e.preventDefault(); reviewPatch(cv.dataset.confirmVin, { confirm_vin: true }, 'Photo VIN confirmed'); return; }
+  const uf = e.target.closest('[data-unfix]');
+  if (uf) { e.preventDefault(); const [bid, sheet, row] = uf.dataset.unfix.split('|'); removeExcelFix(Number(bid), sheet, Number(row)); return; }
   const cp = e.target.closest('[data-confirm-paper]');
   if (cp) { e.preventDefault(); reviewPatch(cp.dataset.confirmPaper, { confirm_paper: true }, 'Paper VIN confirmed'); return; }
   const cb = e.target.closest('[data-confirm-both]');

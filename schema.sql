@@ -73,6 +73,25 @@ CREATE TABLE IF NOT EXISTS reference_rows (
 CREATE INDEX IF NOT EXISTS idx_ref_batch ON reference_rows(batch_id);
 CREATE INDEX IF NOT EXISTS idx_ref_vin ON reference_rows(vin);
 
+-- Admin approval of an Excel row without a valid VIN: the VIN to use (usually the suggested PDF's VIN) and a
+-- remark. Kept apart from reference_rows so it survives re-reading the Excel (Re-check); applied to the row with
+-- the same sheet, row number and customer name while that row still has no valid VIN.
+CREATE TABLE IF NOT EXISTS excel_fixes (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id      INTEGER NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+  sheet_name    TEXT NOT NULL DEFAULT '',
+  row_no        INTEGER NOT NULL,
+  excel_vin_raw TEXT NOT NULL DEFAULT '',
+  customer_name TEXT NOT NULL DEFAULT '',
+  vin           TEXT NOT NULL,
+  remark        TEXT NOT NULL DEFAULT '',
+  pdf_file_id   TEXT NOT NULL DEFAULT '',
+  ip            TEXT NOT NULL DEFAULT '',
+  at            TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (batch_id, sheet_name, row_no)
+);
+CREATE INDEX IF NOT EXISTS idx_excel_fixes_batch ON excel_fixes(batch_id);
+
 -- Problems found during import.
 CREATE TABLE IF NOT EXISTS issues (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

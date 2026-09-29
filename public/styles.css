@@ -489,3 +489,9 @@ table.baseline td { padding: 9px 10px; }
 /* Excel row without a valid VIN (Check 2) — highlighted special issue */
 tr.row-alert > td { background: color-mix(in srgb, var(--bad, #ef4444) 10%, transparent); }
 tr.row-alert > td:first-child { box-shadow: inset 3px 0 0 var(--bad, #ef4444); }
+
+/* Admin approval note (record pop-up) and the approve form (Excel row without a valid VIN) */
+.admin-note { margin: 8px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 10px; font-size: 12.5px; line-height: 1.55; background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.admin-note .btn { margin-top: 8px; }
+.fix-form { margin-top: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; display: grid; gap: 12px; }
+.fix-form textarea { height: auto; padding: 8px 10px; resize: vertical; font-family: inherit; }

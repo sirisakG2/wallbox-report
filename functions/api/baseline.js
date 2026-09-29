@@ -1,4 +1,4 @@
-// GET /api/baseline?batch=&band=(l1|l2|l3|nopdf|pdfonly|wrongmonth)&page=1&size=50   (size=all for export)
+// GET /api/baseline?batch=&band=(l1|l2|l3|nopdf|novin|admin|pdfonly|wrongmonth)&page=1&size=50   (size=all for export)
 // Check 2: every Excel install row is the baseline, matched with the PDF record of the same VIN.
 import { buildBaseline } from '../../lib/baseline.js';
 import { json } from '../../lib/server.js';
@@ -10,6 +10,7 @@ export async function onRequestGet({ request, env }) {
   const band = p.get('band') || '';
   const list = band === 'pdfonly' ? pdfOnly
     : band === 'wrongmonth' ? rows.filter((r) => r.excel_month_ok === false || r.pdf_month_ok === false)
+    : band === 'admin' ? rows.filter((r) => r.complete_by === 'admin')
     : band ? rows.filter((r) => r.band === band) : rows;
   if (band && band !== 'pdfonly') list.sort((a, b) => a.batch_id - b.batch_id || a.row_no - b.row_no);
   const all = p.get('size') === 'all';
