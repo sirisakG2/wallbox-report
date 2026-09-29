@@ -485,3 +485,7 @@ table.baseline td { padding: 9px 10px; }
 
 /* Value confirmed by an admin after checking the PDF */
 .admin-tag { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px; font: 600 10.5px/16px var(--font, inherit); letter-spacing: .02em; color: var(--accent, #2dd4bf); border: 1px solid currentColor; vertical-align: 1px; font-family: inherit; }
+
+/* Excel row without a valid VIN (Check 2) — highlighted special issue */
+tr.row-alert > td { background: color-mix(in srgb, var(--bad, #ef4444) 10%, transparent); }
+tr.row-alert > td:first-child { box-shadow: inset 3px 0 0 var(--bad, #ef4444); }

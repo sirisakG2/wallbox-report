@@ -28,7 +28,7 @@ function vinFills(row, r, photoKey = 'vin_picture', paperKey = 'paper_vin') {
   if (adminText(r)) row.getCell('admin').fill = ADMIN_FILL;
 }
 // Check 2 result per Excel row / PDF (lib/baseline.js).
-const XL_LEVEL = { l1: '① Match 3/3', l2: '② File + Photo', l3: '③ File only', nopdf: 'No PDF file', noexcel: 'Not in Excel' };
+const XL_LEVEL = { l1: '① Match 3/3', l2: '② File + Photo', l3: '③ File only', nopdf: 'No PDF file', novin: '⚠ No valid VIN in Excel', noexcel: 'Not in Excel' };
 const driveLink = (id) => (id ? { text: 'Open PDF', hyperlink: `https://drive.google.com/file/d/${id}/view` } : '');
 const urlLink = (u) => (u ? { text: u.replace(/^https?:\/\//, ''), hyperlink: u } : '');
 
@@ -109,13 +109,15 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     file_status_text: r.file_status ? `${r.file_status === 'updated' ? 'Updated' : 'Deleted'} ${String(r.file_status_at).slice(0, 10)}` : '',
     date_why: r.date_conf_reasons.join('; '),
     ...r,
+    _raw: r,
     vin_level_label: `${r.vin_level} · ${r.vin_level_label}`,
     vin_picture: photoText(r), paper_vin: paperText(r), admin: adminText(r),
     match: flagText(r.vin_photo_match),
     install_date: toDate(r.install_date),
     job_url: urlLink(r.job_url),
     pdf_link: driveLink(r.pdf_file_id),
-  })), (row, r) => {
+  })), (row, m) => {
+    const r = m._raw; // the record itself (display values in m may be formatted)
     if (r.date_month_ok === false || !r.install_date) { row.getCell('date_month').fill = RED_FILL; row.getCell('install_date').fill = RED_FILL; }
     row.getCell('xl_level').fill = r.xl_band === 'l1' ? GREEN_FILL : r.xl_band === 'l2' ? AMBER_FILL : RED_FILL;
     const xl = row.getCell('xl_pct');
@@ -159,12 +161,14 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
       { header: 'PDF file', key: 'pdf_name', width: 40 },
       { header: 'PDF link', key: 'pdf_link', width: 10 },
     ], records.map((r) => ({
+      _raw: r,
       install_date: toDate(r.install_date),
       date_month: !r.install_date ? 'NO DATE' : r.date_month_ok === false ? `✘ ${r.install_date.slice(0, 7)} ≠ ${r.month}` : '✔',
       month: r.month, file_vin: r.file_vin || '', vin_picture: photoText(r),
       paper_vin: paperText(r), admin: adminText(r), level: LEVEL[r.vin_level], read_by: r.vin_read_by === 'free' ? 'Free reader' : r.vin_read_by === 'ai' ? 'AI' : '',
       why: r.vin_conf_reasons.join('; '), customer_name: r.customer_name, job_number: r.job_number, pdf_name: r.pdf_name, pdf_link: driveLink(r.pdf_file_id),
-    })), (row, r) => {
+    })), (row, m) => {
+    const r = m._raw; // the record itself (display values in m may be formatted)
       row.getCell('level').fill = r.vin_level === 1 ? GREEN_FILL : r.vin_level === 2 ? AMBER_FILL : RED_FILL;
       if (r.date_month_ok === false || !r.install_date) { row.getCell('date_month').fill = RED_FILL; row.getCell('install_date').fill = RED_FILL; }
       vinFills(row, r);
@@ -200,12 +204,13 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     { header: 'Job no. (PDF)', key: 'pdf_job', width: 15 },
     { header: 'Note', key: 'hint', width: 60 },
   ], base.rows.map((x) => ({
+    ...x, // check results (band, record, parts, …) for the colouring below; only column keys are written
     excel_month: x.excel_month_ok === false ? `✘ ${x.install_date.slice(0, 7)} ≠ ${x.month}` : x.excel_month_ok ? '✔' : '',
     pdf_month: x.pdf_month_ok === false ? `✘ ${x.record.install_date.slice(0, 7)} ≠ ${x.month}` : x.pdf_month_ok ? '✔' : '',
-    month: x.month, sheet_name: x.sheet_name, row_no: x.row_no, vin: x.vin, customer_name: x.customer_name,
+    month: x.month, sheet_name: x.sheet_name, row_no: x.row_no, vin: x.invalid_vin && !x.vin ? '(empty)' : x.vin, customer_name: x.customer_name,
     case_number: x.case_number, install_date: toDate(x.install_date),
     level: XL_LEVEL[x.band] || '',
-    pdf_file: x.record?.pdf_name || 'No PDF file with this VIN in the folder',
+    pdf_file: x.record?.pdf_name || (x.invalid_vin ? (x.suggestion ? `Suggested: ${x.suggestion.pdf_name}` : '') : 'No PDF file with this VIN in the folder'),
     photo_vin: x.record ? photoText(x.record) : '',
     paper_vin: x.record ? paperText(x.record) || 'not readable' : '',
     admin: x.record ? adminText(x.record) : '',
@@ -214,9 +219,14 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     date: x.parts ? (x.parts.date_days === 0 ? '✔ same' : x.parts.date_days === null ? '' : `${x.parts.date_days} days`) : '',
     score: x.score / 100,
     pdf_name: x.record?.customer_name || '', pdf_job: x.record?.job_number || '', pdf_date: toDate(x.record?.install_date),
-    pdf_link: driveLink(x.record?.pdf_file_id), hint: x.hint || '',
+    pdf_link: driveLink(x.record?.pdf_file_id || x.suggestion?.pdf_file_id), hint: x.hint || '',
   })), (row, x) => {
     const fill = x.band === 'l1' ? GREEN_FILL : x.band === 'l2' ? AMBER_FILL : RED_FILL;
+    if (x.invalid_vin) { // special issue: highlight the whole row
+      row.eachCell({ includeEmpty: true }, (c) => { c.fill = RED_FILL; });
+      row.getCell('vin').font = { bold: true, color: { argb: 'FFD23434' } };
+      row.getCell('level').font = { bold: true, color: { argb: 'FFD23434' } };
+    }
     row.getCell('level').fill = fill;
     const sc = row.getCell('score');
     sc.numFmt = '0%';
@@ -279,6 +289,7 @@ export async function buildWorkbook(ExcelJS, { batchId = null, label, kind = 'al
     ['Check 2 · ② File + Photo (paper differs)', base.facets.l2],
     ['Check 2 · ③ File only (photo unread / different)', base.facets.l3],
     ['Check 2 · No PDF file with this VIN in the folder', base.facets.nopdf],
+    ['Check 2 · ⚠ Excel row with no valid VIN (empty / text / typo)', base.facets.novin],
     ['Check 2 · PDF not in Excel', base.facets.pdfonly],
   );
   if (want.problems) lines.push(['Other problems (open)', issues.filter((i) => !i.resolved).length]);

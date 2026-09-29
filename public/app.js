@@ -52,10 +52,10 @@ function excelPill(status, score, withPct = true) {
   return `<span class="pill ${tone} plain lvl">${label}${withPct && status !== 'missing' ? ` ${score}%` : ''}</span>`;
 }
 // Check 2 result (lib/baseline.js): the PDF found by file name in the month folder, then its photo and paper VIN.
-const BAND = { l1: ['ok', '① Match 3/3'], l2: ['warn', '② File + Photo'], l3: ['bad', '③ File only'], nopdf: ['bad', 'No PDF file'], pdfonly: ['info', 'PDF not in Excel'], noexcel: ['bad', 'Not in Excel'] };
+const BAND = { l1: ['ok', '① Match 3/3'], l2: ['warn', '② File + Photo'], l3: ['bad', '③ File only'], nopdf: ['bad', 'No PDF file'], novin: ['bad', '⚠ No valid VIN in Excel'], pdfonly: ['info', 'PDF not in Excel'], noexcel: ['bad', 'Not in Excel'] };
 function matchPct(score, band) {
   const [tone] = BAND[band] || ['neutral'];
-  if (band === 'nopdf' || band === 'noexcel' || !BAND[band]) return `<span class="pill ${tone} plain lvl">${BAND[band]?.[1] || '–'}</span>`;
+  if (band === 'nopdf' || band === 'novin' || band === 'noexcel' || !BAND[band]) return `<span class="pill ${tone} plain lvl">${BAND[band]?.[1] || '–'}</span>`;
   return `<span class="pill ${tone} plain lvl">${BAND[band][1]} · ${score}%</span>`;
 }
 // Photo / paper VIN vs the file name VIN, honouring an admin confirmation (shown with an "admin" tag).
@@ -190,8 +190,8 @@ async function renderDashboard() {
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-head"><h2><span class="tab-num">2</span> Check Excel — Excel rows as baseline, looked up in the PDFs</h2><span class="faint">Excel VIN → PDF file name in the month folder → photo VIN → paper VIN (name &amp; date low priority)</span></div>
-      <div class="grid cols-4 card-pad">
-        ${[['l1', 'PDF found · photo and paper show the Excel VIN'], ['l2', 'PDF found · photo ✔ · paper VIN differs'], ['l3', 'PDF found · photo not read or different — check'], ['nopdf', 'No PDF file with this VIN in the month folder']].map(([k, desc]) => {
+      <div class="grid cols-5 card-pad">
+        ${[['l1', 'PDF found · photo and paper show the Excel VIN'], ['l2', 'PDF found · photo ✔ · paper VIN differs'], ['l3', 'PDF found · photo not read or different — check'], ['nopdf', 'No PDF file with this VIN in the month folder'], ['novin', 'Excel row with an empty or invalid VIN — fix the Excel']].map(([k, desc]) => {
           const n = s.baseline[k];
           const tone = BAND[k][0];
           return `<a class="card kpi kpi-link level-card ${tone}" href="#/check-excel?band=${k}" style="box-shadow:none;background:var(--surface-2)">
@@ -555,7 +555,7 @@ async function renderCheckExcel(params) {
   const monthExcel = state.batches.find((b) => String(b.id) === String(batch));
   const chips = checkChips('check-excel', params, 'band', [
     ['l1', '① Match 3/3', f.l1, 'ok'], ['l2', '② File + Photo', f.l2, 'warn'], ['l3', '③ File only', f.l3, 'bad'],
-    ['nopdf', 'No PDF file', f.nopdf, 'bad'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info'],
+    ['nopdf', 'No PDF file', f.nopdf, 'bad'], ['novin', '⚠ No valid VIN in Excel', f.novin, 'bad'], ['pdfonly', 'PDF · not in Excel', f.pdfonly, 'info'],
     ['wrongmonth', '⚠ Date not in folder month', f.wrongmonth, 'bad']], null, f.excel_rows);
   let table;
   if (band === 'pdfonly') {
@@ -577,6 +577,20 @@ async function renderCheckExcel(params) {
         const r = x.record;
         const pt = x.parts;
         const photo = r ? (r.vin_confirmed ? (r.file_vin || r.vin) : r.vin_picture) : '';
+        if (x.invalid_vin) {
+          const sg = x.suggestion;
+          return `<tr class="row-alert ${sg ? 'clickable' : ''}" data-vin="${esc(sg?.vin || '')}">
+          <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
+          <td class="num faint">${esc(x.row_no)}</td>
+          <td class="mono bad-mark">${x.vin ? esc(x.vin) : '<i>(empty)</i>'}</td>
+          <td colspan="3"><span class="bad-mark"><b>⚠ No valid VIN in Excel</b></span><div class="faint" style="font-size:11.5px">${esc(x.hint)}</div>${sg ? `<a href="${pdfUrl(sg.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:12px">Suggested PDF ${ICON.ext}</a>` : ''}</td>
+          <td>${matchPct(0, 'novin')}</td>
+          <td>${esc(x.customer_name)}</td>
+          <td class="num">${dateCell(x.install_date, '', x.month, x.excel_month_ok)}</td>
+          <td></td>
+          <td style="white-space:nowrap">${x.excel_file_id ? `<a href="${excelUrl(x.excel_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Excel ${ICON.ext}</a>` : ''}</td>
+        </tr>`;
+        }
         return `<tr class="${r ? 'clickable' : ''}" data-vin="${esc(r?.vin || '')}">
           <td><span class="month-chip">${esc(fmtMonth(x.month))}</span></td>
           <td class="num faint">${esc(x.row_no)}</td>

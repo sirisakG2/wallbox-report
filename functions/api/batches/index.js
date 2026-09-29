@@ -33,7 +33,8 @@ export async function onRequestGet({ request, env }) {
       record_count: recs.length,
       ocr_mismatch_count: recs.filter((r) => r.vin_photo_match === 0).length,
       open_issue_count: data.issues.filter((i) => i.batch_id === b.id && !i.resolved && OTHER_PROBLEM_TYPES.includes(i.type)).length,
-      reference_count: refs.filter((f) => f.sheet === 'install').length,
+      // All Excel install rows, incl. rows without a valid VIN — same count as the Excel.
+      reference_count: refs.filter((f) => f.sheet === 'install' || f.sheet === 'install_invalid').length,
       matched_count: refs.filter((f) => f.sheet === 'install' && recVins.has(f.vin)).length,
       processed_count: files.length,
       deleted_count: recs.filter((r) => r.file_status === 'deleted').length,

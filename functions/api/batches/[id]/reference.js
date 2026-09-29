@@ -18,7 +18,8 @@ export async function onRequestPost({ params, request, env }) {
       .bind(String(body.name || ''), String(body.fileId || ''), batchId),
   ];
   for (const r of body.rows) {
-    if (!r.vin || !['install', 'charger_only', 'install_invalid'].includes(r.sheet)) continue;
+    // install_invalid rows may have an empty VIN cell (kept so Check 2 lists every Excel row).
+    if ((!r.vin && r.sheet !== 'install_invalid') || !['install', 'charger_only', 'install_invalid'].includes(r.sheet)) continue;
     stmts.push(db.prepare(`INSERT INTO reference_rows (batch_id, ${COLS.join(', ')}) VALUES (?, ${COLS.map(() => '?').join(', ')})`)
       .bind(batchId, ...COLS.map((c) => (c === 'row_no' ? Number(r[c]) || 0 : String(r[c] ?? '')))));
   }

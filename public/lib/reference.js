@@ -25,6 +25,7 @@ function toIsoDate(v) {
 }
 
 const HEADERS = {
+  seq: (h) => h.includes('ลำดับ'),
   vin: (h) => /vin/i.test(h),
   case_number: (h) => /case\s*number/i.test(h),
   customer_name: (h) => h.includes('ชื่อ'),
@@ -59,9 +60,14 @@ function readSheet(ws, sheetType) {
     const rawVin = cellText(get('vin')).trim();
     const vin = normalizeVin(rawVin);
     const valid = VIN_RE.test(vin);
-    // Keep install rows whose VIN cell has something that is not a VIN (e.g. "ติดตั้งก่อนรับรถ" or a typo)
-    // so they can be listed as Excel problems; empty VIN cells are notes/footer rows and are skipped.
-    if (!valid && !(sheetType === 'install' && rawVin && cellText(get('customer_name')).trim())) continue;
+    // Every install record is kept, so Check 2 has the same number of rows as the Excel. A record is a row
+    // with a number in the "ลำดับ" (sequence) column; its VIN may be empty or not a VIN (e.g. "ติดตั้งก่อนรับรถ"
+    // or a typo) — those are listed as "No valid VIN" problems. Rows without a sequence number (package notes
+    // and legends under the table) are skipped unless they hold a valid VIN. Without a ลำดับ column, a row
+    // with a customer name and a non-empty VIN cell counts as a record.
+    const seq = cols.seq ? cellText(get('seq')).trim() : '';
+    const isRecord = cols.seq ? /^\d+(\.0+)?$/.test(seq) : !!(rawVin && cellText(get('customer_name')).trim());
+    if (!valid && !(sheetType === 'install' && isRecord)) continue;
     rows.push({
       sheet: valid ? sheetType : 'install_invalid',
       vin: valid ? vin : rawVin,

@@ -72,7 +72,7 @@
 | ส่วน | ความหมาย |
 |---|---|
 | **① Check PDF** (3 กล่อง) | จำนวนและ % ของ PDF แต่ละระดับ ①②③ คลิกกล่องเพื่อเปิดรายการใน ① Check PDF |
-| **② Check Excel** (4 กล่อง) | จำนวนแถว Excel แยกตามผล: ① Match 3/3, ② File + Photo, ③ File only, No PDF file และลิงก์ "PDFs not in any Excel" |
+| **② Check Excel** (5 กล่อง) | จำนวนแถว Excel แยกตามผล: ① Match 3/3, ② File + Photo, ③ File only, No PDF file, ⚠ No valid VIN in Excel และลิงก์ "PDFs not in any Excel" (รวมทุกกล่อง = จำนวนแถวใน Excel) |
 | Records | จำนวน PDF (VIN ไม่ซ้ำ) และจำนวนเดือน |
 | To review | จำนวนรายการที่ต้องตรวจ (① ระดับ ③, ② ผล ③ File only / ไม่อยู่ใน Excel, หรือวันที่ต่ำกว่า 95%) คลิกเพื่อเปิดคิวงาน |
 | In reference Excel | สัดส่วนแถว Excel ที่มี PDF |
@@ -122,7 +122,7 @@
 
 ## 6. ② Check Excel — Excel ของเดือนเป็นฐาน (VIN เป็นคีย์) เทียบกับ PDF ในโฟลเดอร์เดียวกัน
 
-ไฟล์ **Excel สรุปงานติดตั้งในโฟลเดอร์ของเดือน** (ชีตติดตั้ง) เป็น "ข้อมูลฐาน" 1 แถว = 1 VIN (**VIN คอลัมน์ H เป็นคีย์หลัก**) ระบบตรวจแต่ละแถวตามลำดับความสำคัญ:
+ไฟล์ **Excel สรุปงานติดตั้งในโฟลเดอร์ของเดือน** (ชีตติดตั้ง) เป็น "ข้อมูลฐาน" 1 แถว = 1 VIN (**VIN คอลัมน์ H เป็นคีย์หลัก**) ระบบเก็บ**ทุกแถวที่มีเลขลำดับ (คอลัมน์ ลำดับ)** จึงมีจำนวนแถว**เท่ากับ Excel** เสมอ (แถวหมายเหตุ/แพคเกจใต้ตารางที่ไม่มีเลขลำดับไม่นับ) แล้วตรวจแต่ละแถวตามลำดับความสำคัญ:
 
 1. **หา PDF ในโฟลเดอร์เดียวกัน** ที่**ชื่อไฟล์**มี VIN เดียวกัน → เก็บเป็น **Found PDF file** (ชื่อไฟล์ + ลิงก์) ถ้าไม่พบ = **No PDF file**
 2. ใน PDF ที่พบ ตรวจว่า **VIN ในรูปถ่าย** และ **VIN ในช่องกระดาษ** ตรงกับ VIN ใน Excel หรือไม่
@@ -136,6 +136,7 @@
 | **② File + Photo** (ส้ม) | พบ PDF · รูป ✔ · ช่องกระดาษต่าง/อ่านไม่ได้ | โดยทั่วไปถูกต้อง แจ้งช่างแก้แบบฟอร์มถ้าจำเป็น |
 | **③ File only** (แดง) | พบ PDF แต่รูปอ่านไม่ได้หรือเป็น VIN อื่น | เปิด PDF ดูรูป แล้วกด **Photo shows this VIN** หรือ **Correct VIN** |
 | **No PDF file** (แดง) | ไม่มี PDF ที่ชื่อไฟล์มี VIN นี้ในโฟลเดอร์ของเดือน | ดูหมายเหตุใต้ข้อความ: ระบบบอกถ้าพบ VIN นี้ใน**รูป/ช่องกระดาษ**ของ PDF อื่น (ชื่อไฟล์พิมพ์ผิด) หรือ PDF อยู่ใน**โฟลเดอร์เดือนอื่น** · ถ้าไม่มีเลย ให้ขอ PDF จากผู้รับเหมา |
+| **⚠ No valid VIN in Excel** (แถวสีแดงทั้งแถว) | แถวใน Excel ที่ช่อง VIN ว่าง, เป็นข้อความ (เช่น "ติดตั้งก่อนรับรถ") หรือ VIN ผิดรูปแบบ — เป็นปัญหาพิเศษ ต้องแก้ Excel | ดูหมายเหตุ: ระบบแนะนำ PDF ที่ชื่อลูกค้าเหมือนกัน (Suggested PDF) เปิดดู VIN จาก PDF แล้วแก้ช่อง VIN ใน Excel → Re-check เดือนนั้น · มีใน Other problems ② ด้วย |
 | PDF · not in Excel | PDF ในโฟลเดอร์ที่ไม่มีแถวใน Excel | ตรวจว่าลืมใส่ใน Excel หรือ VIN ใน Excel พิมพ์ผิด |
 
 ### % match (รวม 100)
@@ -152,7 +153,7 @@
 
 ### หน้าจอ
 
-- ชิป **Result**: All / ① Match 3/3 / ② File + Photo / ③ File only / No PDF file / PDF · not in Excel / ⚠ Date not in folder month
+- ชิป **Result**: All (= จำนวนแถวใน Excel) / ① Match 3/3 / ② File + Photo / ③ File only / No PDF file / **⚠ No valid VIN in Excel** / PDF · not in Excel / ⚠ Date not in folder month
 - คอลัมน์: Month · Row · **VIN (key)** · **Found PDF file** (คลิกเปิด PDF) · **Photo VIN** (✔ หรือค่าที่อ่านได้ สีแดง) · **Paper VIN** (✔ หรือค่าที่อ่านได้ สีส้ม) · **Result** · Customer · Install date · Name % · ลิงก์ Excel
 - ถ้าชื่อหรือวันที่ต่าง จะแสดงค่าจาก PDF ใต้ค่าจาก Excel · วันที่สีแดง = ไม่อยู่ในเดือนของโฟลเดอร์
 - ปุ่ม **Open <เดือน> Excel** เปิดไฟล์ Excel ใน Drive (เมื่อเลือกเดือน)
@@ -341,7 +342,7 @@
 |---|---|
 | Month · Excel sheet · Excel row | ตำแหน่งแถวใน Excel |
 | VIN (Excel, key) | VIN จาก Excel คอลัมน์ H — คีย์หลัก |
-| Result | ① Match 3/3 (เขียว) / ② File + Photo (ส้ม) / ③ File only / No PDF file (แดง) |
+| Result | ① Match 3/3 (เขียว) / ② File + Photo (ส้ม) / ③ File only / No PDF file (แดง) / **⚠ No valid VIN in Excel** (แดงทั้งแถว) — จำนวนแถวในชีตเท่ากับ Excel |
 | Found PDF file · PDF link | ชื่อไฟล์ PDF ในโฟลเดอร์เดียวกันที่ชื่อไฟล์มี VIN นี้ / ลิงก์ (แดงถ้าไม่พบ) |
 | VIN in photo · Photo = Excel VIN | VIN ที่อ่านจากรูป (สีฟ้า "→ ✔ admin confirmed" = ผู้ดูแลยืนยันแล้ว) / ✔✘ (แดงถ้าไม่ตรง) |
 | Confirmed by admin | ช่องที่ผู้ดูแลยืนยันแล้ว: Photo VIN, Paper VIN, Install date, Customer name (สีฟ้า) |
@@ -351,7 +352,7 @@
 | Install date (Excel) · Install date (PDF) · Date diff | วันที่ติดตั้งและจำนวนวันที่ต่างกัน (ความสำคัญต่ำ) |
 | Excel date in folder month / PDF date in folder month | ✔ หรือ ✘ (แดง) วันที่อยู่ในเดือนของโฟลเดอร์หรือไม่ |
 | Case no. (Excel) · Job no. (PDF) | เพื่อข้อมูล ไม่คิดคะแนน |
-| Note | เมื่อไม่พบ PDF: บอกว่าพบ VIN นี้ในรูป/กระดาษของ PDF อื่น (ชื่อไฟล์ผิด) หรือ PDF อยู่ในเดือนอื่น |
+| Note | เมื่อไม่พบ PDF: บอกว่าพบ VIN นี้ในรูป/กระดาษของ PDF อื่น (ชื่อไฟล์ผิด) หรือ PDF อยู่ในเดือนอื่น · แถวไม่มี VIN: สาเหตุ และ PDF ที่ชื่อลูกค้าเหมือนกัน (Found PDF file = "Suggested: …") |
 
 ### 10.4 ไฟล์ Other problems (Export detailed Excel)
 

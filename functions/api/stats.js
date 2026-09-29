@@ -22,7 +22,7 @@ export async function onRequestGet({ env }) {
     ocr_mismatch: scored.filter((r) => r.vin_photo_match === 0).length,
     ocr_unread: scored.filter((r) => r.vin_photo_match == null).length,
     open_issues: data.issues.filter((i) => !i.resolved && OTHER_PROBLEM_TYPES.includes(i.type)).length,
-    reference_rows: data.refs.filter((f) => f.sheet === 'install').length,
+    reference_rows: data.refs.filter((f) => f.sheet === 'install' || f.sheet === 'install_invalid').length,
     matched: [...installVins].filter((v) => recVins.has(v)).length,
     to_review: scored.filter(needsReview).length,
     full_conf: scored.filter((r) => r.vin_level === 1 && r.date_conf === 100).length,
