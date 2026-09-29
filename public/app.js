@@ -58,6 +58,18 @@ function matchPct(score, band) {
   if (band === 'nopdf' || band === 'noexcel' || !BAND[band]) return `<span class="pill ${tone} plain lvl">${BAND[band]?.[1] || '–'}</span>`;
   return `<span class="pill ${tone} plain lvl">${BAND[band][1]} · ${score}%</span>`;
 }
+// Photo / paper VIN vs the file name VIN, honouring an admin confirmation (shown with an "admin" tag).
+const ADMIN_TAG = '<span class="admin-tag" title="Confirmed by admin after checking the PDF (see History)">admin</span>';
+const photoOk = (r) => !!r.file_vin && (!!r.vin_confirmed || r.vin_picture === r.file_vin);
+const paperOk = (r) => !!r.file_vin && (!!r.paper_confirmed || r.paper_vin === r.file_vin);
+function photoCell(r) {
+  if (r.vin_confirmed && r.file_vin) return `<td class="mono">${esc(r.file_vin)} ${ADMIN_TAG}</td>`;
+  return `<td class="mono ${r.vin_picture && r.vin_picture !== r.file_vin ? 'bad-cell' : ''}">${esc(r.vin_picture) || `<span class="faint">${r.charger_photo ? 'charger photo' : 'not read'}</span>`}</td>`;
+}
+function paperCell(r) {
+  if (r.paper_confirmed && r.file_vin) return `<td class="mono">${esc(r.file_vin)} ${ADMIN_TAG}</td>`;
+  return `<td class="mono ${r.paper_vin !== r.file_vin ? 'warn-cell' : ''}">${esc(r.paper_vin) || '<span class="faint">–</span>'}</td>`;
+}
 const tick = (ok, pts) => (ok ? `<span class="ok-mark" title="+${pts}">✔</span>` : '<span class="bad-mark">✘</span>');
 function dateMark(days) {
   if (days === 0) return '<span class="ok-mark" title="+20">✔</span>';
@@ -518,8 +530,8 @@ async function renderCheckPdf(params) {
             <tr class="clickable" data-i="${i}">
               <td><span class="month-chip">${esc(fmtMonth(r.month))}</span></td>
               <td class="mono">${esc(r.file_vin) || '<span class="faint">none</span>'}</td>
-              <td class="mono ${r.vin_picture && r.vin_picture !== r.file_vin ? 'bad-cell' : ''}">${esc(r.vin_picture) || `<span class="faint">${r.charger_photo ? 'charger photo' : 'not read'}</span>`}</td>
-              <td class="mono ${r.paper_vin !== r.file_vin ? 'warn-cell' : ''}">${esc(r.paper_vin) || '<span class="faint">–</span>'}</td>
+              ${photoCell(r)}
+              ${paperCell(r)}
               <td title="${esc(r.vin_conf_reasons.join(' · '))}">${vinLevelPill(r.vin_level)}</td>
               <td>${readByPill(r.vin_read_by)}</td>
               <td class="num">${dateCell(r.install_date, r.install_date_raw, r.month, r.date_month_ok)}</td>
@@ -570,8 +582,8 @@ async function renderCheckExcel(params) {
           <td class="num faint">${esc(x.row_no)}</td>
           <td class="mono">${esc(x.vin)}</td>
           ${r ? `<td style="max-width:260px"><a href="${pdfUrl(r.pdf_file_id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${esc(r.pdf_name)}">${esc(r.pdf_name.length > 38 ? `${r.pdf_name.slice(0, 38)}…` : r.pdf_name)} ${ICON.ext}</a></td>
-            <td class="mono ${pt.vin_photo ? '' : 'bad-mark'}">${pt.vin_photo ? '✔' : esc(photo || 'not read')}${r.vin_confirmed ? ' <span class="faint">(admin)</span>' : ''}</td>
-            <td class="mono ${pt.vin_paper ? '' : 'warn-mark'}">${pt.vin_paper ? '✔' : esc(r.paper_vin || 'not readable')}</td>`
+            <td class="mono ${pt.vin_photo ? '' : 'bad-mark'}">${pt.vin_photo ? '✔' : esc(photo || 'not read')}${r.vin_confirmed ? ` ${ADMIN_TAG}` : ''}</td>
+            <td class="mono ${pt.vin_paper ? '' : 'warn-mark'}">${pt.vin_paper ? '✔' : esc(r.paper_vin || 'not readable')}${r.paper_confirmed ? ` ${ADMIN_TAG}` : ''}</td>`
             : `<td colspan="3"><span class="bad-mark">No PDF file with this VIN in the folder</span>${x.hint ? `<div class="faint" style="font-size:11.5px">${esc(x.hint)}</div>` : ''}</td>`}
           <td>${matchPct(x.score, x.band)}</td>
           <td>${esc(x.customer_name)}${r && pt.name < 95 ? `<div class="faint" style="font-size:11.5px">PDF: ${esc(r.customer_name)}</div>` : ''}</td>
@@ -679,8 +691,8 @@ async function renderRecords(params) {
               <td class="mono">${esc(r.file_vin || r.vin)}</td>
               <td title="${esc(r.vin_conf_reasons.join(' · '))}">${vinLevelPill(r.vin_level)}</td>
               <td>${matchPct(r.xl_score, r.xl_band)}</td>
-              <td class="mono ${r.vin_picture && r.vin_picture !== r.file_vin ? 'bad-cell' : ''}">${esc(r.vin_picture) || '<span class="faint">not read</span>'}</td>
-              <td class="mono ${r.paper_vin !== r.file_vin ? 'warn-cell' : ''}">${esc(r.paper_vin) || '<span class="faint">–</span>'}</td>
+              ${photoCell(r)}
+              ${paperCell(r)}
               <td class="num">${dateCell(r.install_date, r.install_date_raw, r.month, r.date_month_ok)}</td>
               <td title="${esc(r.date_conf_reasons.join(' · '))}">${confPill(r.date_conf)}</td>
               <td class="mono">${esc(r.job_number)}</td>
@@ -724,12 +736,14 @@ function openRecord(r) {
           <div class="review-head"><span>VIN check</span>${vinLevelPill(r.vin_level)}</div>
           <table class="vin-sources">
             <tr><td>File name</td><td class="mono">${esc(r.file_vin) || '<span class="faint">none</span>'}</td><td>reference</td></tr>
-            <tr><td>Photo</td><td class="mono">${esc(r.vin_picture) || '<span class="faint">not read</span>'}</td><td>${r.vin_picture && r.vin_picture === r.file_vin ? '<span class="ok-mark">✔</span>' : '<span class="bad-mark">✘</span>'}</td></tr>
-            <tr><td>Paper box</td><td class="mono">${esc(r.paper_vin) || '<span class="faint">not read</span>'}</td><td>${r.paper_vin && r.paper_vin === r.file_vin ? '<span class="ok-mark">✔</span>' : '<span class="warn-mark">✘</span>'}</td></tr>
+            <tr><td>Photo</td><td class="mono">${esc(r.vin_picture) || '<span class="faint">not read</span>'}${r.vin_confirmed && r.file_vin ? ` ${ADMIN_TAG}` : ''}</td><td>${photoOk(r) ? '<span class="ok-mark">✔</span>' : '<span class="bad-mark">✘</span>'}</td></tr>
+            <tr><td>Paper box</td><td class="mono">${esc(r.paper_vin) || '<span class="faint">not read</span>'}${r.paper_confirmed && r.file_vin ? ` ${ADMIN_TAG}` : ''}</td><td>${paperOk(r) ? '<span class="ok-mark">✔</span>' : '<span class="warn-mark">✘</span>'}</td></tr>
           </table>
           ${reasons(r.vin_conf_reasons)}
           <div class="row-actions">
-            ${r.vin_confirmed || !r.file_vin ? '' : `<button class="btn sm" data-confirm-vin="${esc(r.vin)}" title="I checked the photo in the PDF: it shows the file name VIN">✔ Photo shows this VIN</button>`}
+            ${!r.file_vin || photoOk(r) || paperOk(r) ? '' : `<button class="btn sm primary" data-confirm-both="${esc(r.vin)}" title="I checked the PDF: the photo and the paper VIN box both show the file name VIN">✔ Photo &amp; paper show this VIN</button>`}
+            ${r.vin_confirmed || !r.file_vin || photoOk(r) ? '' : `<button class="btn sm" data-confirm-vin="${esc(r.vin)}" title="I checked the photo in the PDF: it shows the file name VIN">✔ Photo shows this VIN</button>`}
+            ${r.paper_confirmed || !r.file_vin || paperOk(r) ? '' : `<button class="btn sm" data-confirm-paper="${esc(r.vin)}" title="I checked the paper VIN box in the PDF: it shows the file name VIN">✔ Paper box shows this VIN</button>`}
             <button class="btn sm" data-correct-vin="${esc(r.vin)}">Correct VIN</button>
           </div>
         </div>
@@ -739,8 +753,8 @@ function openRecord(r) {
             <tr><td>Excel row</td><td colspan="2">${r.ref_sheet_name ? `“${esc(r.ref_sheet_name)}” ` : ''}row ${esc(r.ref_row || '?')}</td></tr>
             <tr><td>VIN (Excel)</td><td class="mono" colspan="2">${esc(r.vin)}</td></tr>
             <tr><td>· file name</td><td class="mono">${esc(r.file_vin) || '–'}</td><td>${tick(r.xl_parts.vin_file, 40)}</td></tr>
-            <tr><td>· photo</td><td class="mono">${esc(r.vin_picture) || 'not read'}</td><td>${tick(r.xl_parts.vin_photo, 30)}</td></tr>
-            <tr><td>· paper box</td><td class="mono">${esc(r.paper_vin) || '–'}</td><td>${tick(r.xl_parts.vin_paper, 15)}</td></tr>
+            <tr><td>· photo</td><td class="mono">${esc(r.vin_picture) || 'not read'}${r.vin_confirmed && r.file_vin ? ` ${ADMIN_TAG}` : ''}</td><td>${tick(r.xl_parts.vin_photo, 30)}</td></tr>
+            <tr><td>· paper box</td><td class="mono">${esc(r.paper_vin) || '–'}${r.paper_confirmed && r.file_vin ? ` ${ADMIN_TAG}` : ''}</td><td>${tick(r.xl_parts.vin_paper, 15)}</td></tr>
             <tr><td>Name <span class="faint">(low)</span></td><td>${esc(r.ref_name) || '–'}${r.xl_parts.name < 95 ? `<div class="faint">PDF: ${esc(r.customer_name)}</div>` : ''}</td><td>${r.xl_parts.name}%</td></tr>
             <tr><td>Case no. <span class="faint">(info)</span></td><td class="mono">${esc(r.ref_case) || '–'}${!r.xl_parts.case ? `<div class="faint">PDF: ${esc(r.job_number) || '–'}</div>` : ''}</td><td>${r.xl_parts.case ? '✔' : '–'}</td></tr>
             <tr><td>Date <span class="faint">(low)</span></td><td>${esc(fmtDate(r.ref_date)) || '–'}${r.xl_parts.date_days ? `<div class="faint">PDF: ${esc(fmtDate(r.install_date)) || '–'}</div>` : ''}</td><td>${dateMark(r.xl_parts.date_days)}</td></tr>
@@ -809,7 +823,7 @@ function openRecord(r) {
 }
 
 // ---------- record transaction history ----------
-const FIELD_LABEL = { vin: 'VIN', install_date: 'Installation date', customer_name: 'Customer name', file: 'PDF file' };
+const FIELD_LABEL = { vin: 'VIN', vin_picture: 'Photo VIN', paper_vin: 'Paper VIN box', install_date: 'Installation date', customer_name: 'Customer name', file: 'PDF file' };
 const ACTION_LABEL = { confirm: 'Confirmed', correct: 'Corrected', updated: 'Updated in Drive', deleted: 'Deleted from Drive', restored: 'Back in Drive' };
 // Stored times are UTC ("YYYY-MM-DD HH:MM:SS") → local "dd/mm/yyyy HH:MM".
 function localTime(at) {
@@ -1306,7 +1320,11 @@ document.addEventListener('click', (e) => {
   const en = e.target.closest('[data-edit-name]');
   if (en) { e.preventDefault(); editName(en.dataset.editName); return; }
   const cv = e.target.closest('[data-confirm-vin]');
-  if (cv) { e.preventDefault(); reviewPatch(cv.dataset.confirmVin, { confirm_vin: true }, 'VIN confirmed'); return; }
+  if (cv) { e.preventDefault(); reviewPatch(cv.dataset.confirmVin, { confirm_vin: true }, 'Photo VIN confirmed'); return; }
+  const cp = e.target.closest('[data-confirm-paper]');
+  if (cp) { e.preventDefault(); reviewPatch(cp.dataset.confirmPaper, { confirm_paper: true }, 'Paper VIN confirmed'); return; }
+  const cb = e.target.closest('[data-confirm-both]');
+  if (cb) { e.preventDefault(); reviewPatch(cb.dataset.confirmBoth, { confirm_vin: true, confirm_paper: true }, 'Photo and paper VIN confirmed'); return; }
   const cd = e.target.closest('[data-confirm-date]');
   if (cd) { e.preventDefault(); reviewPatch(cd.dataset.confirmDate, { confirm_date: true }, 'Date confirmed'); return; }
   const xv = e.target.closest('[data-correct-vin]');

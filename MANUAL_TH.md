@@ -48,7 +48,7 @@
 
 1. เข้าเมนู **Months & Import** วาง URL โฟลเดอร์ Google Drive ของเดือน กด **Check folder** แล้วกด **Start import** (ถ้าติดโควต้า AI ให้ทำต่อหลัง 07:00 น.)
 2. เมื่อนำเข้าเสร็จ ระบบเปิด **Import summary** ให้ดูผลรวม
-3. ไปที่ **① Check PDF** เลือกเดือน กดดู **③ Not matched** เปิดแต่ละรายการตรวจรูปใน PDF แล้วกด **Photo shows this VIN** หรือ **Correct VIN**
+3. ไปที่ **① Check PDF** เลือกเดือน กดดู **③ Not matched** เปิดแต่ละรายการตรวจรูปใน PDF แล้วกด **Photo & paper show this VIN** / **Photo shows this VIN** / **Paper box shows this VIN** หรือ **Correct VIN**
 4. ไปที่ **② Check Excel** ดูแถว **③ File only** และ **No PDF file** / **PDF · not in Excel** ตรวจกับ Excel และ PDF
 5. ไปที่ **Other problems** ตรวจ PDF ที่อาจถูกแก้ไข, VIN ซ้ำ, หน้าสแกน และปัญหาใน Excel
 6. ใช้ **All PDFs → Confidence: Needs review** เป็นคิวงาน ตรวจจนหมด
@@ -270,7 +270,8 @@
 |---|---|
 | หัว | ป้าย**เดือน** (เน้นสี), ชื่อลูกค้า, VIN; ถ้า VIN อยู่ใน Excel เดือนอื่นจะมีป้ายเตือน |
 | Open PDF | เปิดไฟล์ PDF ใน Drive เพื่อตรวจ |
-| VIN check (①) | VIN ชื่อไฟล์ / รูป / ช่องกระดาษ พร้อม ✔✘ และเหตุผล · ปุ่ม **Photo shows this VIN** (ยืนยัน) · **Correct VIN** (แก้ VIN — ห้ามซ้ำกับรายการอื่น) |
+| VIN check (①) | VIN ชื่อไฟล์ / รูป / ช่องกระดาษ พร้อม ✔✘ และเหตุผล · ปุ่มยืนยันหลังเปิดดู PDF: **✔ Photo & paper show this VIN** (ยืนยันทั้งสอง) · **✔ Photo shows this VIN** · **✔ Paper box shows this VIN** (แสดงเฉพาะปุ่มที่ต้องใช้) · **Correct VIN** (แก้ VIN — ห้ามซ้ำกับรายการอื่น) |
+| ป้าย **admin** | ค่าที่ผู้ดูแลยืนยันแล้ว ระบบถือว่าตรงกับ VIN ในชื่อไฟล์ และอัปเดตผลทุกที่ทันที: ① Check PDF (เช่น ③ → ①), ② Check Excel (เช่น ③ File only → ① Match 3/3), Dashboard, All PDFs, Other problems และไฟล์ Excel ทุกไฟล์ · ค่าที่อ่านได้เดิมยังแสดงอยู่ และบันทึกใน **History** (เวลา, ค่าเดิม → ค่าใหม่) |
 | ② Check Excel | แถว Excel (ชีตและเลขแถว), VIN (ชื่อไฟล์/รูป/กระดาษ), ชื่อ %, Case no., วันที่ พร้อม ✔✘ · ปุ่ม **Open Excel** · **Name is correct** · **Edit name** (มีปุ่มใช้ชื่อจาก Excel หรือจากชื่อไฟล์) |
 | Installation date | วันที่และข้อความจาก PDF, % และเหตุผล · ปุ่ม **Confirm date** · **Edit date** |
 | History | ประวัติการยืนยัน/แก้ไขทั้งหมด (ค่าเดิม → ค่าใหม่, เวลา, IP) และเหตุการณ์ไฟล์ (อัปเดต/ลบใน Drive) |
@@ -307,7 +308,8 @@
 | VIN (file name, key) | VIN จากชื่อไฟล์ ใช้เป็นคีย์หลัก |
 | ① Check PDF | ผลตรวจ ①: 1 · Match 3/3 / 2 · File = Photo / 3 · Not matched |
 | ② Check Excel / ② Check Excel % | ผล ① Match 3/3 / ② File + Photo / ③ File only (หรือ Not in Excel) และ % match |
-| Photo VIN / Paper VIN | VIN ที่อ่านจากรูป / จากช่องกระดาษ (แดง/ส้มถ้าไม่ตรง) |
+| Photo VIN / Paper VIN | VIN ที่อ่านจากรูป / จากช่องกระดาษ (แดง/ส้มถ้าไม่ตรง) · ถ้าผู้ดูแลยืนยัน: "ค่าที่อ่านได้ → ✔ admin confirmed <VIN>" (สีฟ้า) |
+| Confirmed by admin | ช่องที่ผู้ดูแลยืนยันแล้ว: Photo VIN, Paper VIN, Install date, Customer name (สีฟ้า) — มีในชีต PDF, Check 1 และ Check 2 |
 | Excel row / Excel name (col D) | ชีตและแถวใน Excel / ชื่อลูกค้าใน Excel |
 | Installation date / Date % | วันที่ติดตั้งจาก PDF / ความมั่นใจของวันที่ |
 | Date in folder month | ✔ = อยู่ในเดือนของโฟลเดอร์ · ✘ 2026-05 ≠ 2026-06 = อยู่เดือนอื่น · NO DATE = อ่านไม่ได้ (แดง พร้อมวันที่แดง) |
@@ -324,8 +326,9 @@
 |---|---|
 | Month | เดือน |
 | VIN in file name (reference) | VIN ในชื่อไฟล์ (ค่าอ้างอิง) |
-| VIN in photo | VIN ที่อ่านจากรูป (หรือ charger photo / not read) — แดงถ้าไม่ตรง |
-| VIN in paper box | VIN ในช่องกระดาษ — ส้มถ้าไม่ตรง |
+| VIN in photo | VIN ที่อ่านจากรูป (หรือ charger photo / not read) — แดงถ้าไม่ตรง · สีฟ้า = ผู้ดูแลยืนยันแล้ว |
+| VIN in paper box | VIN ในช่องกระดาษ — ส้มถ้าไม่ตรง · สีฟ้า "→ ✔ admin confirmed" = ผู้ดูแลยืนยันแล้ว |
+| Confirmed by admin | ช่องที่ผู้ดูแลยืนยันแล้ว (สีฟ้า) |
 | Result | ① Match 3/3 / ② File = Photo / ③ Not matched (สีเขียว/ส้ม/แดง) |
 | Photo read by | Free reader หรือ AI |
 | Why | เหตุผลของผล |
@@ -340,7 +343,8 @@
 | VIN (Excel, key) | VIN จาก Excel คอลัมน์ H — คีย์หลัก |
 | Result | ① Match 3/3 (เขียว) / ② File + Photo (ส้ม) / ③ File only / No PDF file (แดง) |
 | Found PDF file · PDF link | ชื่อไฟล์ PDF ในโฟลเดอร์เดียวกันที่ชื่อไฟล์มี VIN นี้ / ลิงก์ (แดงถ้าไม่พบ) |
-| VIN in photo · Photo = Excel VIN | VIN ที่อ่านจากรูป ((admin) = ผู้ดูแลยืนยันแล้ว) / ✔✘ (แดงถ้าไม่ตรง) |
+| VIN in photo · Photo = Excel VIN | VIN ที่อ่านจากรูป (สีฟ้า "→ ✔ admin confirmed" = ผู้ดูแลยืนยันแล้ว) / ✔✘ (แดงถ้าไม่ตรง) |
+| Confirmed by admin | ช่องที่ผู้ดูแลยืนยันแล้ว: Photo VIN, Paper VIN, Install date, Customer name (สีฟ้า) |
 | VIN in paper box · Paper = Excel VIN | VIN ในช่องกระดาษ / ✔✘ (ส้มถ้าไม่ตรง) |
 | % match | ไฟล์ 40 + รูป 30 + กระดาษ 15 + ชื่อ 10 + วันที่ 5 |
 | Customer (Excel) · Customer (PDF) · Name % | ชื่อลูกค้าและความเหมือน (ความสำคัญต่ำ; ส้มถ้าต่ำกว่า 80%) |

@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS records (
   vin_photo_match   INTEGER,                   -- 1 match, 0 mismatch, NULL not read
   vin_read_by       TEXT NOT NULL DEFAULT '',  -- free (on-device text recognition) | ai (Workers AI) | ''
   vin_confirmed     INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked the PDF and confirmed/corrected the VIN
+  paper_confirmed   INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked: the paper VIN box shows the file name VIN
   date_confirmed    INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked the PDF and confirmed/corrected the date
   name_confirmed    INTEGER NOT NULL DEFAULT 0, -- 1 = admin checked and confirmed/corrected the customer name
   ocr_raw           TEXT NOT NULL DEFAULT '',

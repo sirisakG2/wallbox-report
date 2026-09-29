@@ -4,6 +4,7 @@
 //   { confirm_date: true }           the date is right as read            (→ 100 %)
 //   { new_vin: "L1NN…" }             correct the VIN (primary key; must not exist yet)
 //   { confirm_vin: true }            the photo shows this VIN             (→ confirmed)
+//   { confirm_paper: true }          the paper VIN box shows this VIN     (→ paper confirmed)
 //   { customer_name: "…" }           correct the customer name            (→ name confirmed)
 //   { confirm_name: true }           the customer name is right as read   (→ 100 %)
 // Every change is written to record_history (old → new value, time, IP); related issues are resolved.
@@ -88,10 +89,17 @@ export async function onRequestPatch({ params, request, env }) {
   }
   if (body.confirm_vin) {
     stmts.push(db.prepare(`UPDATE records SET vin_confirmed = 1, ${noteSql}, updated_at = datetime('now') WHERE vin = ?2`).bind(`VIN ${vin} confirmed by admin`, vin));
-    log('vin', 'confirm', vin, vin, 'Photo shows this VIN');
+    log('vin_picture', 'confirm', rec.vin_picture, vin, 'Photo shows this VIN');
   }
   if (body.new_vin !== undefined || body.confirm_vin) {
     stmts.push(db.prepare(`UPDATE issues SET resolved = 1 WHERE vin = ? AND type IN ('ocr_mismatch', 'ocr_failed', 'missing_vin', 'filename_vin')`).bind(finalVin));
+  }
+  if (body.confirm_paper) {
+    if (!rec.file_vin) return bad('There is no file name VIN to confirm');
+    stmts.push(db.prepare(`UPDATE records SET paper_confirmed = 1, ${noteSql}, updated_at = datetime('now') WHERE vin = ?2`)
+      .bind(`Paper VIN box ${rec.paper_vin || '(unreadable)'} confirmed as ${finalVin} by admin`, finalVin));
+    log('paper_vin', 'confirm', rec.paper_vin, finalVin, 'Paper VIN box shows this VIN', finalVin);
+    stmts.push(db.prepare(`UPDATE issues SET resolved = 1 WHERE vin = ? AND type = 'filename_vin'`).bind(finalVin));
   }
 
   if (!stmts.length) return bad('Nothing to update');
